@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from app.core.followsell_processor import FollowSellProcessor
 from app.models.followsell import FollowSellResponse
-from app.config import UPLOAD_DIR
+from app.config import UPLOADS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def process_followsell(
 
     try:
         # 保存上传的文件
-        upload_path = UPLOAD_DIR / file.filename
+        upload_path = UPLOADS_DIR / file.filename
         with open(upload_path, "wb") as f:
             content = await file.read()
             f.write(content)
@@ -94,7 +94,7 @@ async def download_file(filename: str):
     Returns:
         文件下载响应
     """
-    file_path = UPLOAD_DIR / filename
+    file_path = UPLOADS_DIR / filename
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
