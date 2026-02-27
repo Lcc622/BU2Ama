@@ -570,6 +570,10 @@ class ExcelProcessor:
                                         f"{info.product_code}{target_color}")
                     output_ws.cell(row=output_row_idx, column=2).value = new_sku
 
+                    # 同步更新 Style Number（第 10 列）和 Manufacturer Part Number（第 13 列）
+                    output_ws.cell(row=output_row_idx, column=10).value = new_sku
+                    output_ws.cell(row=output_row_idx, column=13).value = new_sku
+
                     # 替换产品名称中的颜色名称（第 5 列）
                     name_cell = output_ws.cell(row=output_row_idx, column=5)
                     if name_cell.value:
@@ -601,6 +605,10 @@ class ExcelProcessor:
                                         f"{info.product_code}{info.color_code}{target_size}")
                     output_ws.cell(row=output_row_idx, column=2).value = new_sku
 
+                    # 同步更新 Style Number（第 10 列）和 Manufacturer Part Number（第 13 列）
+                    output_ws.cell(row=output_row_idx, column=10).value = new_sku
+                    output_ws.cell(row=output_row_idx, column=13).value = new_sku
+
                     # 替换产品名称中的尺码（第 5 列）
                     name_cell = output_ws.cell(row=output_row_idx, column=5)
                     if name_cell.value:
@@ -613,6 +621,9 @@ class ExcelProcessor:
 
                     # 替换 size_map 列（第 299 列，KM 列）- 去掉前导零
                     output_ws.cell(row=output_row_idx, column=299).value = size_without_leading_zero
+
+                    # 替换 SIZE 列（第 153 列，EW 列）- 去掉前导零
+                    output_ws.cell(row=output_row_idx, column=153).value = size_without_leading_zero
 
             processed_count += 1
             output_row_idx += 1
