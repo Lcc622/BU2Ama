@@ -1,0 +1,432 @@
+[
+  {
+    "output_field": "Product Type",
+    "input_field": "Product Type",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Seller SKU",
+    "input_field": "SKU",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Brand Name",
+    "input_field": "Brand Name",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Update Delete",
+    "input_field": "Athlete",
+    "confidence": 0.6
+  },
+  {
+    "output_field": "Product Name",
+    "input_field": "Item Name",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Product Description",
+    "input_field": "Product Description",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Item Type Keyword",
+    "input_field": "Item Type Keyword",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Style Number",
+    "input_field": "Part Number",
+    "confidence": 0.7
+  },
+  {
+    "output_field": "Closure Type",
+    "input_field": "Closure Type",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Manufacturer Part Number",
+    "input_field": "Manufacturer",
+    "confidence": 0.67
+  },
+  {
+    "output_field": "Care instructions",
+    "input_field": "Care Instructions",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Your Price",
+    "input_field": "List Price",
+    "confidence": 0.6
+  },
+  {
+    "output_field": "Quantity",
+    "input_field": "Quantity (US)",
+    "confidence": 0.76
+  },
+  {
+    "output_field": "Outer Material Type",
+    "input_field": "Material",
+    "confidence": 0.59
+  },
+  {
+    "output_field": "Target Gender",
+    "input_field": "Target Gender",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Age Range Description",
+    "input_field": "Age Range Description",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Apparel Size System",
+    "input_field": "Apparel Size System",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Apparel Size Class",
+    "input_field": "Apparel Size Class",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Apparel Size Value",
+    "input_field": "Apparel Size Value",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Apparel Size Body Type",
+    "input_field": "Apparel Size Body Type",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Apparel Size Height Type",
+    "input_field": "Apparel Size Height Type",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Main Image URL",
+    "input_field": "Main Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Other Image URL",
+    "input_field": "Other Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Other Image URL",
+    "input_field": "Other Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Other Image URL",
+    "input_field": "Other Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Other Image URL",
+    "input_field": "Other Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Other Image URL",
+    "input_field": "Other Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Swatch Image URL",
+    "input_field": "Swatch Image URL",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Parentage",
+    "input_field": "Parentage Level",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Parent SKU",
+    "input_field": "Parent SKU",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Relationship Type",
+    "input_field": "Compliance Regulation Type",
+    "confidence": 0.6
+  },
+  {
+    "output_field": "Variation Theme",
+    "input_field": "Variation Theme Name",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Key Product Features",
+    "input_field": "Bullet Point",
+    "confidence": 0.9
+  },
+  {
+    "output_field": "Key Product Features",
+    "input_field": "Bullet Point",
+    "confidence": 0.9
+  },
+  {
+    "output_field": "Key Product Features",
+    "input_field": "Bullet Point",
+    "confidence": 0.9
+  },
+  {
+    "output_field": "Key Product Features",
+    "input_field": "Bullet Point",
+    "confidence": 0.9
+  },
+  {
+    "output_field": "Key Product Features",
+    "input_field": "Bullet Point",
+    "confidence": 0.9
+  },
+  {
+    "output_field": "Generic Keyword",
+    "input_field": "Generic Keywords",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Style Name",
+    "input_field": "Team Name",
+    "confidence": 0.74
+  },
+  {
+    "output_field": "Occasion Type",
+    "input_field": "Occasion",
+    "confidence": 0.76
+  },
+  {
+    "output_field": "Occasion Type",
+    "input_field": "Occasion",
+    "confidence": 0.76
+  },
+  {
+    "output_field": "Occasion Type",
+    "input_field": "Occasion",
+    "confidence": 0.76
+  },
+  {
+    "output_field": "Occasion Type",
+    "input_field": "Occasion",
+    "confidence": 0.76
+  },
+  {
+    "output_field": "Occasion Type",
+    "input_field": "Occasion",
+    "confidence": 0.76
+  },
+  {
+    "output_field": "Colour Map",
+    "input_field": "Color Map",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Material type",
+    "input_field": "Metal Type",
+    "confidence": 0.78
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Lifestyle",
+    "confidence": 0.67
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Waist Style",
+    "confidence": 0.55
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Collar Style",
+    "confidence": 0.53
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Collar Style",
+    "confidence": 0.53
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Back Style",
+    "confidence": 0.5
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Back Style",
+    "confidence": 0.5
+  },
+  {
+    "output_field": "Occasion Lifestyle",
+    "input_field": "Back Style",
+    "confidence": 0.5
+  },
+  {
+    "output_field": "Color",
+    "input_field": "Color",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Department",
+    "input_field": "Department Name",
+    "confidence": 0.8
+  },
+  {
+    "output_field": "Size",
+    "input_field": "Size",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Pattern",
+    "input_field": "Pattern",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "NeckStyle",
+    "input_field": "Neck Style",
+    "confidence": 0.95
+  },
+  {
+    "output_field": "Seasons",
+    "input_field": "Seasons",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Apparel Silhouette",
+    "input_field": "Apparel Silhouette",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Pattern Style",
+    "input_field": "Battery Type",
+    "confidence": 0.72
+  },
+  {
+    "output_field": "Embellishment Feature",
+    "input_field": "Embellishment Feature",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Sleeve Type",
+    "input_field": "Sleeve Type",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Size Map",
+    "input_field": "Cup Size",
+    "confidence": 0.5
+  },
+  {
+    "output_field": "item_length_description",
+    "input_field": "Lining Description",
+    "confidence": 0.9
+  },
+  {
+    "output_field": "Height",
+    "input_field": "Item Height",
+    "confidence": 0.71
+  },
+  {
+    "output_field": "Width",
+    "input_field": "Lens Width",
+    "confidence": 0.67
+  },
+  {
+    "output_field": "Length",
+    "input_field": "Item Length",
+    "confidence": 0.71
+  },
+  {
+    "output_field": "Package Length Unit Of Measure",
+    "input_field": "Package Length Unit",
+    "confidence": 0.78
+  },
+  {
+    "output_field": "Package Weight",
+    "input_field": "Package Weight",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Package Weight Unit Of Measure",
+    "input_field": "Package Weight Unit",
+    "confidence": 0.78
+  },
+  {
+    "output_field": "Fabric Type",
+    "input_field": "Fabric Type",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Import Designation",
+    "input_field": "Import Designation",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Cpsia Warning",
+    "input_field": "Pesticide Marking",
+    "confidence": 0.53
+  },
+  {
+    "output_field": "Is this product a battery or does it utilize batteries?",
+    "input_field": "Is This Product Subject To Buyer Age Restrictions",
+    "confidence": 0.54
+  },
+  {
+    "output_field": "Batteries are Included",
+    "input_field": "Are batteries included?",
+    "confidence": 0.8
+  },
+  {
+    "output_field": "Dangerous Goods Regulations",
+    "input_field": "Dangerous Goods Regulations",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Material/Fabric Regulations",
+    "input_field": "Compliance Regulation Type",
+    "confidence": 0.57
+  },
+  {
+    "output_field": "List Price",
+    "input_field": "Waist Size",
+    "confidence": 0.6
+  },
+  {
+    "output_field": "Launch Date",
+    "input_field": "Product Site Launch Date",
+    "confidence": 0.63
+  },
+  {
+    "output_field": "Waist Style",
+    "input_field": "Back Style",
+    "confidence": 0.67
+  },
+  {
+    "output_field": "Back Style",
+    "input_field": "Back Style",
+    "confidence": 1.0
+  },
+  {
+    "output_field": "Business Price",
+    "input_field": "Accessories",
+    "confidence": 0.48
+  },
+  {
+    "output_field": "Quantity Price",
+    "input_field": "Battery IEC Code",
+    "confidence": 0.53
+  },
+  {
+    "output_field": "Quantity Price 2",
+    "input_field": "Quantity Price Type (Amazon Business (B2B), US)",
+    "confidence": 0.51
+  },
+  {
+    "output_field": "Quantity Price 3",
+    "input_field": "Product Id Type",
+    "confidence": 0.45
+  }
+]

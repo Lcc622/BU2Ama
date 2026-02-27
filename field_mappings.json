@@ -1,0 +1,432 @@
+[
+  {
+    "index": 2,
+    "output": "Product Type",
+    "input": "Status"
+  },
+  {
+    "index": 3,
+    "output": "Seller SKU",
+    "input": "Title"
+  },
+  {
+    "index": 4,
+    "output": "Brand Name",
+    "input": "SKU"
+  },
+  {
+    "index": 5,
+    "output": "Update Delete",
+    "input": "Product Type"
+  },
+  {
+    "index": 6,
+    "output": "Product Name",
+    "input": "Listing Action"
+  },
+  {
+    "index": 7,
+    "output": "Product Description",
+    "input": "Parentage Level"
+  },
+  {
+    "index": 8,
+    "output": "Item Type Keyword",
+    "input": "Parent SKU"
+  },
+  {
+    "index": 9,
+    "output": "Style Number",
+    "input": "Variation Theme Name"
+  },
+  {
+    "index": 10,
+    "output": "Closure Type",
+    "input": "Item Name"
+  },
+  {
+    "index": 11,
+    "output": "Manufacturer Part Number",
+    "input": "Brand Name"
+  },
+  {
+    "index": 12,
+    "output": "Care instructions",
+    "input": "Product Id Type"
+  },
+  {
+    "index": 13,
+    "output": "Your Price",
+    "input": "Product Id"
+  },
+  {
+    "index": 14,
+    "output": "Quantity",
+    "input": "Item Type Keyword"
+  },
+  {
+    "index": 15,
+    "output": "Outer Material Type",
+    "input": "Collar Style"
+  },
+  {
+    "index": 16,
+    "output": "Target Gender",
+    "input": "Collar Style"
+  },
+  {
+    "index": 17,
+    "output": "Age Range Description",
+    "input": "Model Number"
+  },
+  {
+    "index": 18,
+    "output": "Apparel Size System",
+    "input": "Model Name"
+  },
+  {
+    "index": 19,
+    "output": "Apparel Size Class",
+    "input": "UNSPSC Code"
+  },
+  {
+    "index": 20,
+    "output": "Apparel Size Value",
+    "input": "National Stock Number"
+  },
+  {
+    "index": 21,
+    "output": "Apparel Size Body Type",
+    "input": "Manufacturer"
+  },
+  {
+    "index": 22,
+    "output": "Apparel Size Height Type",
+    "input": "Main Image URL"
+  },
+  {
+    "index": 23,
+    "output": "Main Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 24,
+    "output": "Other Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 25,
+    "output": "Other Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 26,
+    "output": "Other Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 27,
+    "output": "Other Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 28,
+    "output": "Other Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 29,
+    "output": "Swatch Image URL",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 30,
+    "output": "Parentage",
+    "input": "Other Image URL"
+  },
+  {
+    "index": 31,
+    "output": "Parent SKU",
+    "input": "Swatch Image URL"
+  },
+  {
+    "index": 32,
+    "output": "Relationship Type",
+    "input": "Product Description"
+  },
+  {
+    "index": 33,
+    "output": "Variation Theme",
+    "input": "Bullet Point"
+  },
+  {
+    "index": 34,
+    "output": "Key Product Features",
+    "input": "Bullet Point"
+  },
+  {
+    "index": 35,
+    "output": "Key Product Features",
+    "input": "Bullet Point"
+  },
+  {
+    "index": 36,
+    "output": "Key Product Features",
+    "input": "Bullet Point"
+  },
+  {
+    "index": 37,
+    "output": "Key Product Features",
+    "input": "Bullet Point"
+  },
+  {
+    "index": 38,
+    "output": "Key Product Features",
+    "input": "Generic Keywords"
+  },
+  {
+    "index": 39,
+    "output": "Generic Keyword",
+    "input": "Special Features"
+  },
+  {
+    "index": 40,
+    "output": "Style Name",
+    "input": "Special Features"
+  },
+  {
+    "index": 41,
+    "output": "Occasion Type",
+    "input": "Special Features"
+  },
+  {
+    "index": 42,
+    "output": "Occasion Type",
+    "input": "Special Features"
+  },
+  {
+    "index": 43,
+    "output": "Occasion Type",
+    "input": "Special Features"
+  },
+  {
+    "index": 44,
+    "output": "Occasion Type",
+    "input": "Lifestyle"
+  },
+  {
+    "index": 45,
+    "output": "Occasion Type",
+    "input": "Style"
+  },
+  {
+    "index": 46,
+    "output": "Colour Map",
+    "input": "Department Name"
+  },
+  {
+    "index": 47,
+    "output": "Material type",
+    "input": "Target Gender"
+  },
+  {
+    "index": 48,
+    "output": "Occasion Lifestyle",
+    "input": "Age Range Description"
+  },
+  {
+    "index": 49,
+    "output": "Occasion Lifestyle",
+    "input": "Apparel Size System"
+  },
+  {
+    "index": 50,
+    "output": "Occasion Lifestyle",
+    "input": "Apparel Size Class"
+  },
+  {
+    "index": 51,
+    "output": "Occasion Lifestyle",
+    "input": "Apparel Size Value"
+  },
+  {
+    "index": 52,
+    "output": "Occasion Lifestyle",
+    "input": "Apparel Size To Range"
+  },
+  {
+    "index": 53,
+    "output": "Occasion Lifestyle",
+    "input": "Apparel Size Body Type"
+  },
+  {
+    "index": 54,
+    "output": "Occasion Lifestyle",
+    "input": "Apparel Size Height Type"
+  },
+  {
+    "index": 55,
+    "output": "Color",
+    "input": "Material"
+  },
+  {
+    "index": 56,
+    "output": "Department",
+    "input": "Material"
+  },
+  {
+    "index": 57,
+    "output": "Size",
+    "input": "Material"
+  },
+  {
+    "index": 58,
+    "output": "Pattern",
+    "input": "Fabric Type"
+  },
+  {
+    "index": 59,
+    "output": "NeckStyle",
+    "input": "Lining Description"
+  },
+  {
+    "index": 60,
+    "output": "Seasons",
+    "input": "Number of Items"
+  },
+  {
+    "index": 61,
+    "output": "Apparel Silhouette",
+    "input": "Item Package Quantity"
+  },
+  {
+    "index": 62,
+    "output": "Pattern Style",
+    "input": "Strap Type"
+  },
+  {
+    "index": 63,
+    "output": "Embellishment Feature",
+    "input": "Strap Type"
+  },
+  {
+    "index": 64,
+    "output": "Sleeve Type",
+    "input": "Strap Type"
+  },
+  {
+    "index": 65,
+    "output": "Size Map",
+    "input": "Special Size"
+  },
+  {
+    "index": 66,
+    "output": "item_length_description",
+    "input": "Color Map"
+  },
+  {
+    "index": 67,
+    "output": "Height",
+    "input": "Color"
+  },
+  {
+    "index": 68,
+    "output": "Width",
+    "input": "Ring Size"
+  },
+  {
+    "index": 69,
+    "output": "Length",
+    "input": "Item Length Description"
+  },
+  {
+    "index": 70,
+    "output": "Package Length Unit Of Measure",
+    "input": "Metal Type"
+  },
+  {
+    "index": 71,
+    "output": "Package Weight",
+    "input": "Metal Type"
+  },
+  {
+    "index": 72,
+    "output": "Package Weight Unit Of Measure",
+    "input": "Metal Type"
+  },
+  {
+    "index": 73,
+    "output": "Fabric Type",
+    "input": "Metal Type"
+  },
+  {
+    "index": 74,
+    "output": "Import Designation",
+    "input": "Metal Type"
+  },
+  {
+    "index": 75,
+    "output": "Cpsia Warning",
+    "input": "Occasion"
+  },
+  {
+    "index": 76,
+    "output": "Is this product a battery or does it utilize batteries?",
+    "input": "Occasion"
+  },
+  {
+    "index": 77,
+    "output": "Batteries are Included",
+    "input": "Occasion"
+  },
+  {
+    "index": 78,
+    "output": "Dangerous Goods Regulations",
+    "input": "Occasion"
+  },
+  {
+    "index": 79,
+    "output": "Material/Fabric Regulations",
+    "input": "Occasion"
+  },
+  {
+    "index": 80,
+    "output": "List Price",
+    "input": "Part Number"
+  },
+  {
+    "index": 81,
+    "output": "Launch Date",
+    "input": "Item Shape"
+  },
+  {
+    "index": 82,
+    "output": "Waist Style",
+    "input": "Theme"
+  },
+  {
+    "index": 83,
+    "output": "Back Style",
+    "input": "Fit Type"
+  },
+  {
+    "index": 84,
+    "output": "Business Price",
+    "input": "Pocket Description"
+  },
+  {
+    "index": 85,
+    "output": "Quantity Price",
+    "input": "Pocket Description"
+  },
+  {
+    "index": 86,
+    "output": "Quantity Price 2",
+    "input": "Pocket Description"
+  },
+  {
+    "index": 87,
+    "output": "Quantity Price 3",
+    "input": "Pocket Description"
+  }
+]

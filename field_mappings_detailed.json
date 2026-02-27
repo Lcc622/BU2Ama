@@ -1,0 +1,885 @@
+{
+  "total": 86,
+  "categories": {
+    "基础信息": [
+      {
+        "column": 2,
+        "output_field": "Product Type",
+        "input_field": "Status"
+      },
+      {
+        "column": 5,
+        "output_field": "Update Delete",
+        "input_field": "Product Type"
+      }
+    ],
+    "SKU相关": [
+      {
+        "column": 3,
+        "output_field": "Seller SKU",
+        "input_field": "Title"
+      },
+      {
+        "column": 9,
+        "output_field": "Style Number",
+        "input_field": "Variation Theme Name"
+      },
+      {
+        "column": 11,
+        "output_field": "Manufacturer Part Number",
+        "input_field": "Brand Name"
+      },
+      {
+        "column": 31,
+        "output_field": "Parent SKU",
+        "input_field": "Swatch Image URL"
+      }
+    ],
+    "产品描述": [
+      {
+        "column": 4,
+        "output_field": "Brand Name",
+        "input_field": "SKU"
+      },
+      {
+        "column": 6,
+        "output_field": "Product Name",
+        "input_field": "Listing Action"
+      },
+      {
+        "column": 7,
+        "output_field": "Product Description",
+        "input_field": "Parentage Level"
+      },
+      {
+        "column": 17,
+        "output_field": "Age Range Description",
+        "input_field": "Model Number"
+      },
+      {
+        "column": 40,
+        "output_field": "Style Name",
+        "input_field": "Special Features"
+      }
+    ],
+    "尺码相关": [
+      {
+        "column": 18,
+        "output_field": "Apparel Size System",
+        "input_field": "Model Name"
+      },
+      {
+        "column": 19,
+        "output_field": "Apparel Size Class",
+        "input_field": "UNSPSC Code"
+      },
+      {
+        "column": 20,
+        "output_field": "Apparel Size Value",
+        "input_field": "National Stock Number"
+      },
+      {
+        "column": 21,
+        "output_field": "Apparel Size Body Type",
+        "input_field": "Manufacturer"
+      },
+      {
+        "column": 22,
+        "output_field": "Apparel Size Height Type",
+        "input_field": "Main Image URL"
+      },
+      {
+        "column": 57,
+        "output_field": "Size",
+        "input_field": "Material"
+      },
+      {
+        "column": 65,
+        "output_field": "Size Map",
+        "input_field": "Special Size"
+      }
+    ],
+    "图片相关": [
+      {
+        "column": 23,
+        "output_field": "Main Image URL",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 24,
+        "output_field": "Other Image URL",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 25,
+        "output_field": "Other Image URL",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 26,
+        "output_field": "Other Image URL",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 27,
+        "output_field": "Other Image URL",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 28,
+        "output_field": "Other Image URL",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 29,
+        "output_field": "Swatch Image URL",
+        "input_field": "Other Image URL"
+      }
+    ],
+    "变体关系": [
+      {
+        "column": 30,
+        "output_field": "Parentage",
+        "input_field": "Other Image URL"
+      },
+      {
+        "column": 32,
+        "output_field": "Relationship Type",
+        "input_field": "Product Description"
+      },
+      {
+        "column": 33,
+        "output_field": "Variation Theme",
+        "input_field": "Bullet Point"
+      }
+    ],
+    "产品特性": [
+      {
+        "column": 8,
+        "output_field": "Item Type Keyword",
+        "input_field": "Parent SKU"
+      },
+      {
+        "column": 34,
+        "output_field": "Key Product Features",
+        "input_field": "Bullet Point"
+      },
+      {
+        "column": 35,
+        "output_field": "Key Product Features",
+        "input_field": "Bullet Point"
+      },
+      {
+        "column": 36,
+        "output_field": "Key Product Features",
+        "input_field": "Bullet Point"
+      },
+      {
+        "column": 37,
+        "output_field": "Key Product Features",
+        "input_field": "Bullet Point"
+      },
+      {
+        "column": 38,
+        "output_field": "Key Product Features",
+        "input_field": "Generic Keywords"
+      },
+      {
+        "column": 39,
+        "output_field": "Generic Keyword",
+        "input_field": "Special Features"
+      }
+    ],
+    "价格相关": [
+      {
+        "column": 13,
+        "output_field": "Your Price",
+        "input_field": "Product Id"
+      },
+      {
+        "column": 80,
+        "output_field": "List Price",
+        "input_field": "Part Number"
+      },
+      {
+        "column": 84,
+        "output_field": "Business Price",
+        "input_field": "Pocket Description"
+      },
+      {
+        "column": 85,
+        "output_field": "Quantity Price",
+        "input_field": "Pocket Description"
+      },
+      {
+        "column": 86,
+        "output_field": "Quantity Price 2",
+        "input_field": "Pocket Description"
+      },
+      {
+        "column": 87,
+        "output_field": "Quantity Price 3",
+        "input_field": "Pocket Description"
+      }
+    ],
+    "其他": [
+      {
+        "column": 10,
+        "output_field": "Closure Type",
+        "input_field": "Item Name"
+      },
+      {
+        "column": 12,
+        "output_field": "Care instructions",
+        "input_field": "Product Id Type"
+      },
+      {
+        "column": 14,
+        "output_field": "Quantity",
+        "input_field": "Item Type Keyword"
+      },
+      {
+        "column": 15,
+        "output_field": "Outer Material Type",
+        "input_field": "Collar Style"
+      },
+      {
+        "column": 16,
+        "output_field": "Target Gender",
+        "input_field": "Collar Style"
+      },
+      {
+        "column": 41,
+        "output_field": "Occasion Type",
+        "input_field": "Special Features"
+      },
+      {
+        "column": 42,
+        "output_field": "Occasion Type",
+        "input_field": "Special Features"
+      },
+      {
+        "column": 43,
+        "output_field": "Occasion Type",
+        "input_field": "Special Features"
+      },
+      {
+        "column": 44,
+        "output_field": "Occasion Type",
+        "input_field": "Lifestyle"
+      },
+      {
+        "column": 45,
+        "output_field": "Occasion Type",
+        "input_field": "Style"
+      },
+      {
+        "column": 46,
+        "output_field": "Colour Map",
+        "input_field": "Department Name"
+      },
+      {
+        "column": 47,
+        "output_field": "Material type",
+        "input_field": "Target Gender"
+      },
+      {
+        "column": 48,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Age Range Description"
+      },
+      {
+        "column": 49,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Apparel Size System"
+      },
+      {
+        "column": 50,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Apparel Size Class"
+      },
+      {
+        "column": 51,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Apparel Size Value"
+      },
+      {
+        "column": 52,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Apparel Size To Range"
+      },
+      {
+        "column": 53,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Apparel Size Body Type"
+      },
+      {
+        "column": 54,
+        "output_field": "Occasion Lifestyle",
+        "input_field": "Apparel Size Height Type"
+      },
+      {
+        "column": 55,
+        "output_field": "Color",
+        "input_field": "Material"
+      },
+      {
+        "column": 56,
+        "output_field": "Department",
+        "input_field": "Material"
+      },
+      {
+        "column": 58,
+        "output_field": "Pattern",
+        "input_field": "Fabric Type"
+      },
+      {
+        "column": 59,
+        "output_field": "NeckStyle",
+        "input_field": "Lining Description"
+      },
+      {
+        "column": 60,
+        "output_field": "Seasons",
+        "input_field": "Number of Items"
+      },
+      {
+        "column": 61,
+        "output_field": "Apparel Silhouette",
+        "input_field": "Item Package Quantity"
+      },
+      {
+        "column": 62,
+        "output_field": "Pattern Style",
+        "input_field": "Strap Type"
+      },
+      {
+        "column": 63,
+        "output_field": "Embellishment Feature",
+        "input_field": "Strap Type"
+      },
+      {
+        "column": 64,
+        "output_field": "Sleeve Type",
+        "input_field": "Strap Type"
+      },
+      {
+        "column": 66,
+        "output_field": "item_length_description",
+        "input_field": "Color Map"
+      },
+      {
+        "column": 67,
+        "output_field": "Height",
+        "input_field": "Color"
+      },
+      {
+        "column": 68,
+        "output_field": "Width",
+        "input_field": "Ring Size"
+      },
+      {
+        "column": 69,
+        "output_field": "Length",
+        "input_field": "Item Length Description"
+      },
+      {
+        "column": 70,
+        "output_field": "Package Length Unit Of Measure",
+        "input_field": "Metal Type"
+      },
+      {
+        "column": 71,
+        "output_field": "Package Weight",
+        "input_field": "Metal Type"
+      },
+      {
+        "column": 72,
+        "output_field": "Package Weight Unit Of Measure",
+        "input_field": "Metal Type"
+      },
+      {
+        "column": 73,
+        "output_field": "Fabric Type",
+        "input_field": "Metal Type"
+      },
+      {
+        "column": 74,
+        "output_field": "Import Designation",
+        "input_field": "Metal Type"
+      },
+      {
+        "column": 75,
+        "output_field": "Cpsia Warning",
+        "input_field": "Occasion"
+      },
+      {
+        "column": 76,
+        "output_field": "Is this product a battery or does it utilize batteries?",
+        "input_field": "Occasion"
+      },
+      {
+        "column": 77,
+        "output_field": "Batteries are Included",
+        "input_field": "Occasion"
+      },
+      {
+        "column": 78,
+        "output_field": "Dangerous Goods Regulations",
+        "input_field": "Occasion"
+      },
+      {
+        "column": 79,
+        "output_field": "Material/Fabric Regulations",
+        "input_field": "Occasion"
+      },
+      {
+        "column": 81,
+        "output_field": "Launch Date",
+        "input_field": "Item Shape"
+      },
+      {
+        "column": 82,
+        "output_field": "Waist Style",
+        "input_field": "Theme"
+      },
+      {
+        "column": 83,
+        "output_field": "Back Style",
+        "input_field": "Fit Type"
+      }
+    ]
+  },
+  "all_mappings": [
+    {
+      "column": 2,
+      "output_field": "Product Type",
+      "input_field": "Status"
+    },
+    {
+      "column": 3,
+      "output_field": "Seller SKU",
+      "input_field": "Title"
+    },
+    {
+      "column": 4,
+      "output_field": "Brand Name",
+      "input_field": "SKU"
+    },
+    {
+      "column": 5,
+      "output_field": "Update Delete",
+      "input_field": "Product Type"
+    },
+    {
+      "column": 6,
+      "output_field": "Product Name",
+      "input_field": "Listing Action"
+    },
+    {
+      "column": 7,
+      "output_field": "Product Description",
+      "input_field": "Parentage Level"
+    },
+    {
+      "column": 8,
+      "output_field": "Item Type Keyword",
+      "input_field": "Parent SKU"
+    },
+    {
+      "column": 9,
+      "output_field": "Style Number",
+      "input_field": "Variation Theme Name"
+    },
+    {
+      "column": 10,
+      "output_field": "Closure Type",
+      "input_field": "Item Name"
+    },
+    {
+      "column": 11,
+      "output_field": "Manufacturer Part Number",
+      "input_field": "Brand Name"
+    },
+    {
+      "column": 12,
+      "output_field": "Care instructions",
+      "input_field": "Product Id Type"
+    },
+    {
+      "column": 13,
+      "output_field": "Your Price",
+      "input_field": "Product Id"
+    },
+    {
+      "column": 14,
+      "output_field": "Quantity",
+      "input_field": "Item Type Keyword"
+    },
+    {
+      "column": 15,
+      "output_field": "Outer Material Type",
+      "input_field": "Collar Style"
+    },
+    {
+      "column": 16,
+      "output_field": "Target Gender",
+      "input_field": "Collar Style"
+    },
+    {
+      "column": 17,
+      "output_field": "Age Range Description",
+      "input_field": "Model Number"
+    },
+    {
+      "column": 18,
+      "output_field": "Apparel Size System",
+      "input_field": "Model Name"
+    },
+    {
+      "column": 19,
+      "output_field": "Apparel Size Class",
+      "input_field": "UNSPSC Code"
+    },
+    {
+      "column": 20,
+      "output_field": "Apparel Size Value",
+      "input_field": "National Stock Number"
+    },
+    {
+      "column": 21,
+      "output_field": "Apparel Size Body Type",
+      "input_field": "Manufacturer"
+    },
+    {
+      "column": 22,
+      "output_field": "Apparel Size Height Type",
+      "input_field": "Main Image URL"
+    },
+    {
+      "column": 23,
+      "output_field": "Main Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 24,
+      "output_field": "Other Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 25,
+      "output_field": "Other Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 26,
+      "output_field": "Other Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 27,
+      "output_field": "Other Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 28,
+      "output_field": "Other Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 29,
+      "output_field": "Swatch Image URL",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 30,
+      "output_field": "Parentage",
+      "input_field": "Other Image URL"
+    },
+    {
+      "column": 31,
+      "output_field": "Parent SKU",
+      "input_field": "Swatch Image URL"
+    },
+    {
+      "column": 32,
+      "output_field": "Relationship Type",
+      "input_field": "Product Description"
+    },
+    {
+      "column": 33,
+      "output_field": "Variation Theme",
+      "input_field": "Bullet Point"
+    },
+    {
+      "column": 34,
+      "output_field": "Key Product Features",
+      "input_field": "Bullet Point"
+    },
+    {
+      "column": 35,
+      "output_field": "Key Product Features",
+      "input_field": "Bullet Point"
+    },
+    {
+      "column": 36,
+      "output_field": "Key Product Features",
+      "input_field": "Bullet Point"
+    },
+    {
+      "column": 37,
+      "output_field": "Key Product Features",
+      "input_field": "Bullet Point"
+    },
+    {
+      "column": 38,
+      "output_field": "Key Product Features",
+      "input_field": "Generic Keywords"
+    },
+    {
+      "column": 39,
+      "output_field": "Generic Keyword",
+      "input_field": "Special Features"
+    },
+    {
+      "column": 40,
+      "output_field": "Style Name",
+      "input_field": "Special Features"
+    },
+    {
+      "column": 41,
+      "output_field": "Occasion Type",
+      "input_field": "Special Features"
+    },
+    {
+      "column": 42,
+      "output_field": "Occasion Type",
+      "input_field": "Special Features"
+    },
+    {
+      "column": 43,
+      "output_field": "Occasion Type",
+      "input_field": "Special Features"
+    },
+    {
+      "column": 44,
+      "output_field": "Occasion Type",
+      "input_field": "Lifestyle"
+    },
+    {
+      "column": 45,
+      "output_field": "Occasion Type",
+      "input_field": "Style"
+    },
+    {
+      "column": 46,
+      "output_field": "Colour Map",
+      "input_field": "Department Name"
+    },
+    {
+      "column": 47,
+      "output_field": "Material type",
+      "input_field": "Target Gender"
+    },
+    {
+      "column": 48,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Age Range Description"
+    },
+    {
+      "column": 49,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Apparel Size System"
+    },
+    {
+      "column": 50,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Apparel Size Class"
+    },
+    {
+      "column": 51,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Apparel Size Value"
+    },
+    {
+      "column": 52,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Apparel Size To Range"
+    },
+    {
+      "column": 53,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Apparel Size Body Type"
+    },
+    {
+      "column": 54,
+      "output_field": "Occasion Lifestyle",
+      "input_field": "Apparel Size Height Type"
+    },
+    {
+      "column": 55,
+      "output_field": "Color",
+      "input_field": "Material"
+    },
+    {
+      "column": 56,
+      "output_field": "Department",
+      "input_field": "Material"
+    },
+    {
+      "column": 57,
+      "output_field": "Size",
+      "input_field": "Material"
+    },
+    {
+      "column": 58,
+      "output_field": "Pattern",
+      "input_field": "Fabric Type"
+    },
+    {
+      "column": 59,
+      "output_field": "NeckStyle",
+      "input_field": "Lining Description"
+    },
+    {
+      "column": 60,
+      "output_field": "Seasons",
+      "input_field": "Number of Items"
+    },
+    {
+      "column": 61,
+      "output_field": "Apparel Silhouette",
+      "input_field": "Item Package Quantity"
+    },
+    {
+      "column": 62,
+      "output_field": "Pattern Style",
+      "input_field": "Strap Type"
+    },
+    {
+      "column": 63,
+      "output_field": "Embellishment Feature",
+      "input_field": "Strap Type"
+    },
+    {
+      "column": 64,
+      "output_field": "Sleeve Type",
+      "input_field": "Strap Type"
+    },
+    {
+      "column": 65,
+      "output_field": "Size Map",
+      "input_field": "Special Size"
+    },
+    {
+      "column": 66,
+      "output_field": "item_length_description",
+      "input_field": "Color Map"
+    },
+    {
+      "column": 67,
+      "output_field": "Height",
+      "input_field": "Color"
+    },
+    {
+      "column": 68,
+      "output_field": "Width",
+      "input_field": "Ring Size"
+    },
+    {
+      "column": 69,
+      "output_field": "Length",
+      "input_field": "Item Length Description"
+    },
+    {
+      "column": 70,
+      "output_field": "Package Length Unit Of Measure",
+      "input_field": "Metal Type"
+    },
+    {
+      "column": 71,
+      "output_field": "Package Weight",
+      "input_field": "Metal Type"
+    },
+    {
+      "column": 72,
+      "output_field": "Package Weight Unit Of Measure",
+      "input_field": "Metal Type"
+    },
+    {
+      "column": 73,
+      "output_field": "Fabric Type",
+      "input_field": "Metal Type"
+    },
+    {
+      "column": 74,
+      "output_field": "Import Designation",
+      "input_field": "Metal Type"
+    },
+    {
+      "column": 75,
+      "output_field": "Cpsia Warning",
+      "input_field": "Occasion"
+    },
+    {
+      "column": 76,
+      "output_field": "Is this product a battery or does it utilize batteries?",
+      "input_field": "Occasion"
+    },
+    {
+      "column": 77,
+      "output_field": "Batteries are Included",
+      "input_field": "Occasion"
+    },
+    {
+      "column": 78,
+      "output_field": "Dangerous Goods Regulations",
+      "input_field": "Occasion"
+    },
+    {
+      "column": 79,
+      "output_field": "Material/Fabric Regulations",
+      "input_field": "Occasion"
+    },
+    {
+      "column": 80,
+      "output_field": "List Price",
+      "input_field": "Part Number"
+    },
+    {
+      "column": 81,
+      "output_field": "Launch Date",
+      "input_field": "Item Shape"
+    },
+    {
+      "column": 82,
+      "output_field": "Waist Style",
+      "input_field": "Theme"
+    },
+    {
+      "column": 83,
+      "output_field": "Back Style",
+      "input_field": "Fit Type"
+    },
+    {
+      "column": 84,
+      "output_field": "Business Price",
+      "input_field": "Pocket Description"
+    },
+    {
+      "column": 85,
+      "output_field": "Quantity Price",
+      "input_field": "Pocket Description"
+    },
+    {
+      "column": 86,
+      "output_field": "Quantity Price 2",
+      "input_field": "Pocket Description"
+    },
+    {
+      "column": 87,
+      "output_field": "Quantity Price 3",
+      "input_field": "Pocket Description"
+    }
+  ]
+}

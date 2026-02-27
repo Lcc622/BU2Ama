@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/data/colorMapping.json
+*.xlsm
+*.xlsx
+!加色模板.xlsm
+!EP-ES01840FL-加色-Coco-2.4新表.xlsm
+
+# Build outputs
+frontend/dist/
+frontend/build/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Generated files
+*.html
+*.pdf
