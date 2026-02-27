@@ -27,11 +27,10 @@ async def get_templates():
     """获取可用的模板列表"""
     templates = []
     for name, config in TEMPLATES.items():
-        template_path = TEMPLATES_DIR / config["file"]
         templates.append(TemplateInfo(
             name=name,
-            file=config["file"],
-            exists=template_path.exists()
+            file="",  # 不再显示文件名
+            exists=True  # 模板配置存在即可
         ))
     return templates
 
