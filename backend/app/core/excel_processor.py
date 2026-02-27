@@ -9,7 +9,7 @@ import openpyxl
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from app.config import UPLOADS_DIR, TEMPLATES_DIR, TEMPLATES
+from app.config import UPLOADS_DIR, TEMPLATES
 from app.core.color_mapper import color_mapper
 from app.models.excel import SKUInfo, ColorDistribution, AnalysisResult
 
@@ -324,12 +324,15 @@ class ExcelProcessor:
         """处理 Excel 文件并生成新文件 - 直接复制输入文件格式
 
         Args:
-            template_type: 模板类型（暂时不使用，保留参数兼容性）
+            template_type: 模板类型（DaMaUS 或 EPUS，决定图片 URL 格式）
             filenames: 输入文件列表
             selected_prefixes: 选中的产品前缀
             target_color: 目标颜色代码（加色模式：替换颜色）
             target_size: 目标尺码（加码模式：替换尺码）
         """
+
+        print(f"[DEBUG] template_type = {template_type}")
+        print(f"[DEBUG] image_variant = {TEMPLATES[template_type]['image_variant']}")
 
         if not filenames:
             raise ValueError("没有输入文件")
@@ -483,9 +486,8 @@ class ExcelProcessor:
                 suffix = info.suffix
                 is_ph_suffix = (suffix == "-PH")
 
-                # EP 店铺使用 L，PZ/DAMA 店铺使用 PL
-                # 这里假设都是 EP 店铺（使用 L）
-                image_variant = "L"
+                # 根据模板类型选择图片 URL 格式
+                image_variant = TEMPLATES[template_type]["image_variant"]
 
                 # 生成图片 URL
                 if is_ph_suffix:

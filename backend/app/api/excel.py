@@ -9,7 +9,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
-from app.config import UPLOADS_DIR, TEMPLATES_DIR, TEMPLATES
+from app.config import UPLOADS_DIR, TEMPLATES
 from app.core.excel_processor import excel_processor
 from app.models.excel import (
     AnalysisResult,
