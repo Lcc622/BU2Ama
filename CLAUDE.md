@@ -46,6 +46,34 @@ docker-compose up
 docker-compose down
 ```
 
+### 局域网访问配置
+
+默认配置已支持局域网访问。要从其他设备访问：
+
+1. **获取本机 IP 地址**
+   ```bash
+   # macOS/Linux
+   ifconfig | grep "inet " | grep -v 127.0.0.1
+
+   # Windows
+   ipconfig
+   ```
+
+2. **修改前端 API 地址**（仅本地开发时需要）
+   编辑 `frontend/.env`，将 `localhost` 改为你的本机 IP：
+   ```
+   VITE_API_URL=http://192.168.1.100:8000
+   ```
+
+3. **访问地址**
+   - 前端：`http://你的IP:5173`
+   - 后端：`http://你的IP:8000`
+
+**注意**：
+- Docker Compose 已配置 CORS 允许所有局域网访问
+- 确保防火墙允许 5173 和 8000 端口
+- 后端已绑定 `0.0.0.0`，前端 Vite 已设置 `host: true`
+
 ### Backend (Python)
 ```bash
 cd backend

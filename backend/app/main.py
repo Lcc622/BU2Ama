@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import CORS_ORIGINS
-from app.api import mapping, excel
+from app.api import mapping, excel, followsell
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -27,6 +27,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(mapping.router)
 app.include_router(excel.router)
+app.include_router(followsell.router)
 
 
 # 全局异常处理

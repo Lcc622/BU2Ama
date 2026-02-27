@@ -8,6 +8,7 @@ import { ColorSelector } from './components/ExcelProcess/ColorSelector';
 import { ProcessButton } from './components/ExcelProcess/ProcessButton';
 import { DownloadLink } from './components/ExcelProcess/DownloadLink';
 import { AddMappingModal } from './components/ColorMapping/AddMappingModal';
+import { FollowSellUpload } from './components/FollowSell/FollowSellUpload';
 import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 
@@ -132,6 +133,8 @@ function ExcelProcessPanel() {
 }
 
 function App() {
+  const [activeTab, setActiveTab] = useState<'excel' | 'mapping' | 'followsell'>('excel');
+
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster
@@ -181,11 +184,48 @@ function App() {
           </div>
         </header>
 
+        {/* Tabs */}
+        <div className="bg-white border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-6">
+            <nav className="flex space-x-8" aria-label="Tabs">
+              <button
+                onClick={() => setActiveTab('excel')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'excel'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                Excel 处理
+              </button>
+              <button
+                onClick={() => setActiveTab('mapping')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'mapping'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                颜色映射
+              </button>
+              <button
+                onClick={() => setActiveTab('followsell')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'followsell'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                跟卖上新
+              </button>
+            </nav>
+          </div>
+        </div>
+
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-6 py-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* 左侧：Excel 处理 */}
-            <div className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-200">
+          {activeTab === 'excel' && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
               <div className="border-b border-slate-200 px-6 py-4">
                 <h2 className="text-xl font-semibold text-primary-900">Excel 处理</h2>
                 <p className="text-xs text-slate-500 mt-1">上传、分析和处理 Excel 文件</p>
@@ -194,9 +234,10 @@ function App() {
                 <ExcelProcessPanel />
               </div>
             </div>
+          )}
 
-            {/* 右侧：颜色映射管理 */}
-            <div className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-200">
+          {activeTab === 'mapping' && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
               <div className="border-b border-slate-200 px-6 py-4">
                 <h2 className="text-xl font-semibold text-primary-900">颜色映射管理</h2>
                 <p className="text-xs text-slate-500 mt-1">管理 SKU 颜色代码映射</p>
@@ -205,7 +246,11 @@ function App() {
                 <ColorMappingList />
               </div>
             </div>
-          </div>
+          )}
+
+          {activeTab === 'followsell' && (
+            <FollowSellUpload />
+          )}
         </main>
       </div>
     </QueryClientProvider>

@@ -10,7 +10,7 @@ services:
       - ./templates:/app/templates
     environment:
       - PYTHONUNBUFFERED=1
-      - CORS_ORIGINS=http://localhost:5173
+      - CORS_ORIGINS=*
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -20,8 +20,6 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    environment:
-      - VITE_API_URL=http://localhost:8000
     command: npm run dev -- --host
     depends_on:
       - backend
