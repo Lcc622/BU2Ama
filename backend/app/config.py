@@ -32,5 +32,8 @@ TEMPLATES = {
     },
     "EPUS": {
         "image_variant": "L"   # 使用 -L1.jpg, -L2.jpg 等
+    },
+    "PZUS": {
+        "image_variant": "PL"  # 使用 -PL1.jpg, -PL2.jpg 等
     }
 }
