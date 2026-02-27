@@ -48,7 +48,6 @@ export function TemplateSelector() {
             />
             <div>
               <div className="font-medium">{template.name}</div>
-              <div className="text-xs text-gray-500">{template.file}</div>
               {!template.exists && (
                 <div className="text-xs text-red-600">模板文件不存在</div>
               )}

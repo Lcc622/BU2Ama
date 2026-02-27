@@ -28,28 +28,8 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
 # 模板配置
-TEMPLATES = {
-    "DaMaUS": {
-        "file": "加色模板.xlsm",
-        "sheet": "Template",
-        "columns": {
-            "sku": 0,
-            "product_name": 1,
-            "key_features": 2,
-            "generic_keyword": 3,
-            "color": 4,
-            "color_map": 5,
-            "size": 6,
-            "main_image": 7,
-            "other_images": list(range(8, 15)),
-            "launch_date": 15
-        },
-        "image_variant": "PL"
-    },
-    "EPUS": {
-        "file": "EP-ES01840FL-加色-Coco-2.4新表.xlsm",
-        "sheet": "Template",
-        "columns": {
+# DaMaUS 和 EPUS 使用相同的列配置，只有图片 URL 格式不同
+TEMPLATE_COLUMNS = {
             # 基础信息 (0-based index)
             "product_type": 0,           # feed_product_type
             "seller_sku": 1,             # item_sku
@@ -138,7 +118,18 @@ TEMPLATES = {
 
             # Launch Date
             "launch_date": 531           # product_site_launch_date
-        },
+        }
+
+# 模板配置：DaMaUS 和 EPUS 使用相同的列配置，只有图片 URL 格式不同
+TEMPLATES = {
+    "DaMaUS": {
+        "sheet": "Template",
+        "columns": TEMPLATE_COLUMNS,
+        "image_variant": "PL"
+    },
+    "EPUS": {
+        "sheet": "Template",
+        "columns": TEMPLATE_COLUMNS,
         "image_variant": "L"
     }
 }
