@@ -42,7 +42,12 @@ export function TemplateSelector() {
               name="template"
               value={template.name}
               checked={templateType === template.name}
-              onChange={(e) => setTemplateType(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'DaMaUS' || value === 'EPUS' || value === 'PZUS') {
+                  setTemplateType(value);
+                }
+              }}
               disabled={!template.exists}
               className="text-blue-600 focus:ring-blue-500"
             />
