@@ -1,4 +1,4 @@
-import axios from '@/lib/axios';
+import { apiClient } from '@/lib/axios';
 
 export const followsellApi = {
   /**
@@ -12,7 +12,7 @@ export const followsellApi = {
     formData.append('file', file);
     formData.append('new_product_code', newProductCode);
 
-    const response = await axios.post('/api/followsell/process', formData, {
+    const response = await apiClient.post('/api/followsell/process', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -27,7 +27,7 @@ export const followsellApi = {
    * @returns Blob 对象
    */
   download: async (filename: string) => {
-    const response = await axios.get(`/api/followsell/download/${filename}`, {
+    const response = await apiClient.get(`/api/followsell/download/${filename}`, {
       responseType: 'blob',
     });
 
