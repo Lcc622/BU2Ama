@@ -2,15 +2,16 @@ import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { mappingApi } from './services/mappingApi';
 import { FileUploader } from './components/ExcelUpload/FileUploader';
-import { AnalysisResult } from './components/ExcelUpload/AnalysisResult';
 import { TemplateSelector } from './components/ExcelProcess/TemplateSelector';
 import { ColorSelector } from './components/ExcelProcess/ColorSelector';
+import { PrefixInput } from './components/ExcelProcess/PrefixInput';
 import { ProcessButton } from './components/ExcelProcess/ProcessButton';
 import { DownloadLink } from './components/ExcelProcess/DownloadLink';
 import { AddMappingModal } from './components/ColorMapping/AddMappingModal';
 import { FollowSellUpload } from './components/FollowSell/FollowSellUpload';
 import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
+import fallbackColorMappings from './data/colorMapping';
 
 function ColorMappingList() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -18,6 +19,7 @@ function ColorMappingList() {
   const { data: mappings, isLoading, error } = useQuery({
     queryKey: ['mappings'],
     queryFn: mappingApi.getAll,
+    initialData: fallbackColorMappings,
   });
 
   if (isLoading) {
@@ -119,10 +121,10 @@ function ExcelProcessPanel() {
   return (
     <div className="space-y-6">
       <FileUploader />
-      <AnalysisResult />
 
       <div className="border-t pt-6 space-y-4">
         <TemplateSelector />
+        <PrefixInput />
         <ColorSelector />
       </div>
 

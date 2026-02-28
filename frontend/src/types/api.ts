@@ -42,6 +42,7 @@ export interface ProcessRequest {
   template_type: string;
   filenames: string[];
   selected_prefixes: string[];
+  generated_skus?: string[];
   target_color?: string | null;
   target_size?: string | null;
 }
@@ -51,6 +52,22 @@ export interface ProcessResponse {
   output_filename?: string;
   message?: string;
   processed_count: number;
+}
+
+export interface ProcessAsyncStartResponse {
+  success: boolean;
+  job_id: string;
+  message: string;
+}
+
+export interface ProcessJobStatusResponse {
+  success: boolean;
+  job_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | string;
+  output_filename?: string;
+  processed_count: number;
+  message?: string;
+  error?: string;
 }
 
 // 模板信息
@@ -65,4 +82,41 @@ export interface FileInfo {
   filename: string;
   size: number;
   upload_time: string;
+}
+
+// 跟卖 SKC 查询
+export interface SKCSize {
+  size: string;
+  suffix: string;
+  sku: string;
+}
+
+export interface SKCQueryResponse {
+  success: boolean;
+  skc: string;
+  new_style: string;
+  old_style: string;
+  color_code: string;
+  sizes: SKCSize[];
+  message: string;
+}
+
+export interface SKCProcessResponse {
+  success: boolean;
+  skc: string;
+  new_style: string;
+  old_style: string;
+  total_skus: number;
+  output_filename?: string;
+  message: string;
+}
+
+export interface SKCBatchProcessResponse {
+  success: boolean;
+  total_input_skcs: number;
+  success_skcs: number;
+  failed_skcs: number;
+  total_skus: number;
+  output_filename?: string;
+  message: string;
 }

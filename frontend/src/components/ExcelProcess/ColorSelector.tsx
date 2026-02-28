@@ -1,12 +1,10 @@
-import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { mappingApi } from '../../services/mappingApi';
 import { useProcessStore } from '../../store/useProcessStore';
+import fallbackColorMappings from '../../data/colorMapping';
 
 export function ColorSelector() {
   const {
-    productPrefix,
-    setProductPrefix,
     mode,
     setMode,
     startSize,
@@ -23,6 +21,7 @@ export function ColorSelector() {
   const { data: mappings } = useQuery({
     queryKey: ['mappings'],
     queryFn: mappingApi.getAll,
+    initialData: fallbackColorMappings,
   });
 
   // 获取所有颜色代码用于 datalist
@@ -37,37 +36,8 @@ export function ColorSelector() {
   // 实时生成 SKU 预览
   const previewSKUs = generateSKUs();
 
-  // 当输入变化时，更新 selectedPrefixes（用于后续处理）
-  useEffect(() => {
-    // 这里可以添加逻辑来更新 selectedPrefixes
-    // 目前 selectedPrefixes 的管理可能在其他地方
-  }, [productPrefix, mode, startSize, endSize, sizeStep, colorList]);
-
   return (
     <div className="space-y-6">
-      {/* 产品前缀输入 */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-700">
-          产品前缀 <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          value={productPrefix}
-          onChange={(e) => {
-            const value = e.target.value.toUpperCase();
-            if (value.length <= 7) {
-              setProductPrefix(value);
-            }
-          }}
-          placeholder="例如: EG02230"
-          maxLength={7}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <p className="text-xs text-gray-500">
-          请输入7位产品代码（例如: EG02230）
-        </p>
-      </div>
-
       {/* 模式选择 */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-gray-700">
@@ -84,7 +54,7 @@ export function ColorSelector() {
               className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
             />
             <span className="ml-2 text-sm text-gray-700">
-              加色（一色多码）
+              加色（一码多色）
             </span>
           </label>
           <label className="flex items-center cursor-pointer">
@@ -97,17 +67,17 @@ export function ColorSelector() {
               className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
             />
             <span className="ml-2 text-sm text-gray-700">
-              加码（一码多色）
+              加码（一色多码）
             </span>
           </label>
         </div>
       </div>
 
-      {/* 加色模式 */}
-      {mode === 'add-color' && (
+      {/* 加码模式 */}
+      {mode === 'add-code' && (
         <div className="space-y-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
           <p className="text-sm text-gray-700 font-medium">
-            加色模式：选择一个颜色，生成多个尺码的 SKU
+            加码模式：选择一个颜色，生成多个尺码的 SKU
           </p>
 
           {/* 颜色选择 */}
@@ -115,22 +85,28 @@ export function ColorSelector() {
             <label className="text-sm font-medium text-gray-700">
               颜色代码 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              list="color-list"
-              value={colorList}
-              onChange={(e) => setColorList(e.target.value.toUpperCase())}
-              placeholder="输入或选择颜色代码（例如: LV）"
-              maxLength={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <datalist id="color-list">
-              {colorCodes.map((code) => (
-                <option key={code} value={code}>
-                  {code} - {mappings?.[code]}
-                </option>
-              ))}
-            </datalist>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={colorList}
+                onChange={(e) => setColorList(e.target.value.toUpperCase())}
+                placeholder="手动输入颜色代码（例如: LV）"
+                maxLength={2}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                value={colorCodes.includes(colorList) ? colorList : ''}
+                onChange={(e) => setColorList(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">从下拉选择颜色代码</option>
+                {colorCodes.map((code) => (
+                  <option key={code} value={code}>
+                    {code} - {mappings?.[code]}
+                  </option>
+                ))}
+              </select>
+            </div>
             {colorList && mappings?.[colorList] && (
               <p className="text-xs text-green-600">
                 {colorList} - {mappings[colorList]}
@@ -198,11 +174,11 @@ export function ColorSelector() {
         </div>
       )}
 
-      {/* 加码模式 */}
-      {mode === 'add-code' && (
+      {/* 加色模式 */}
+      {mode === 'add-color' && (
         <div className="space-y-4 p-4 bg-green-50 border border-green-200 rounded-md">
           <p className="text-sm text-gray-700 font-medium">
-            加码模式：选择一个尺码，生成多个颜色的 SKU
+            加色模式：选择一个尺码，生成多个颜色的 SKU
           </p>
 
           {/* 尺码选择 */}
@@ -244,7 +220,7 @@ export function ColorSelector() {
             {colorList && (
               <div className="flex flex-wrap gap-2 mt-2">
                 {colorList
-                  .split(/[,，\s]+/)
+                  .split(/[,，、;；\s]+/)
                   .map((c) => c.trim().toUpperCase())
                   .filter((c) => c.length === 2)
                   .map((code) => (

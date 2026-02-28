@@ -7,18 +7,91 @@ import { useUploadStore } from '../../store/useUploadStore';
 import { useProcessStore } from '../../store/useProcessStore';
 import toast from 'react-hot-toast';
 
+const buildGeneratedSkus = (
+  prefixes: string[],
+  mode: 'add-color' | 'add-code',
+  startSize: string,
+  endSize: string,
+  sizeStep: number,
+  colorList: string
+): string[] => {
+  const normalizedPrefixes = prefixes
+    .map((p) => p.trim().toUpperCase())
+    .filter((p) => p.length > 0);
+
+  if (normalizedPrefixes.length === 0) return [];
+
+  const colors = colorList
+    .split(/[,，、;；\s]+/)
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => c.length === 2);
+
+  if (colors.length === 0) return [];
+
+  if (mode === 'add-color') {
+    const size = parseInt(startSize, 10);
+    if (Number.isNaN(size)) return [];
+    const sizeStr = size.toString().padStart(2, '0');
+
+    return normalizedPrefixes.flatMap((prefix) =>
+      colors.map((color) => `${prefix}${color}${sizeStr}`)
+    );
+  }
+
+  const start = parseInt(startSize, 10);
+  const end = parseInt(endSize, 10);
+  if (Number.isNaN(start) || Number.isNaN(end) || start > end || sizeStep <= 0) return [];
+
+  const skus: string[] = [];
+  for (const prefix of normalizedPrefixes) {
+    const color = colors[0];
+    for (let size = start; size <= end; size += sizeStep) {
+      skus.push(`${prefix}${color}${size.toString().padStart(2, '0')}`);
+    }
+  }
+  return skus;
+};
+
 export function ProcessButton() {
   const uploadedFiles = useUploadStore((state) => state.uploadedFiles);
-  const analysisResult = useUploadStore((state) => state.analysisResult);
   const selectedPrefixes = useUploadStore((state) => state.selectedPrefixes);
   const templateType = useProcessStore((state) => state.templateType);
   const targetColor = useProcessStore((state) => state.targetColor);
   const targetSize = useProcessStore((state) => state.targetSize);
+  const mode = useProcessStore((state) => state.mode);
+  const startSize = useProcessStore((state) => state.startSize);
+  const endSize = useProcessStore((state) => state.endSize);
+  const sizeStep = useProcessStore((state) => state.sizeStep);
+  const colorList = useProcessStore((state) => state.colorList);
   const setOutputFilename = useProcessStore((state) => state.setOutputFilename);
   const setIsProcessing = useProcessStore((state) => state.setIsProcessing);
-
   const processMutation = useMutation({
-    mutationFn: excelApi.processExcel,
+    mutationFn: async (request: Parameters<typeof excelApi.processExcel>[0]) => {
+      const start = await excelApi.processExcelAsync(request);
+      const jobId = start.job_id;
+
+      const pollIntervalMs = 2500;
+      const timeoutMs = 1000 * 60 * 10;
+      const begin = Date.now();
+
+      while (Date.now() - begin < timeoutMs) {
+        const status = await excelApi.getProcessStatus(jobId);
+        if (status.status === 'completed') {
+          return {
+            success: true,
+            output_filename: status.output_filename,
+            message: status.message || '处理完成',
+            processed_count: status.processed_count,
+          };
+        }
+        if (status.status === 'failed') {
+          throw new Error(status.error || status.message || '处理失败');
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+
+      throw new Error('处理超时，请稍后重试');
+    },
     onSuccess: (data) => {
       setOutputFilename(data.output_filename || null);
       setIsProcessing(false);
@@ -31,75 +104,51 @@ export function ProcessButton() {
   });
 
   const handleProcess = async () => {
-    if (uploadedFiles.length === 0) {
-      toast.error('请先上传 Excel 文件');
-      return;
-    }
-
-    if (!analysisResult) {
-      toast.error('请先分析 Excel 文件');
-      return;
-    }
-
     if (selectedPrefixes.length === 0) {
-      toast.error('请至少选择一个产品前缀');
+      toast.error('请至少添加一个产品前缀');
       return;
-    }
-
-    if (analysisResult.unknown_colors.length > 0) {
-      // 使用 toast 替代 confirm
-      const confirmed = await new Promise<boolean>((resolve) => {
-        toast((t) => (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm font-medium text-slate-900">
-              检测到 {analysisResult.unknown_colors.length} 个未知颜色代码
-            </p>
-            <p className="text-xs text-slate-600">
-              未知颜色的 SKU 将被跳过，是否继续处理？
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  toast.dismiss(t.id);
-                  resolve(false);
-                }}
-                className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  toast.dismiss(t.id);
-                  resolve(true);
-                }}
-                className="px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded hover:bg-primary-700 transition-colors"
-              >
-                继续处理
-              </button>
-            </div>
-          </div>
-        ), {
-          duration: Infinity,
-          style: { maxWidth: '400px' },
-        });
-      });
-
-      if (!confirmed) return;
     }
 
     setIsProcessing(true);
+
+    // 过滤掉模板文件，只传递数据文件
+    const fallbackFiles = [
+      'EP-2.xlsm',
+      'EP-1.xlsm',
+      'EP-0.xlsm',
+      'All+Listings+Report.txt',
+    ];
+    const sourceFiles = uploadedFiles.length > 0 ? uploadedFiles : fallbackFiles;
+
+    const dataFiles = sourceFiles.filter(filename => {
+      const lower = filename.toLowerCase();
+      return !(lower.includes('模板') || lower.includes('模版') || lower.includes('template'));
+    });
+    const generatedSkus = buildGeneratedSkus(
+      selectedPrefixes,
+      mode,
+      startSize,
+      endSize,
+      sizeStep,
+      colorList
+    );
+    if (generatedSkus.length === 0) {
+      setIsProcessing(false);
+      toast.error('请先填写颜色和尺码条件，生成目标 SKU');
+      return;
+    }
+
     processMutation.mutate({
       template_type: templateType,
-      filenames: uploadedFiles, // 使用所有上传的文件
+      filenames: dataFiles, // 只使用数据文件
       selected_prefixes: selectedPrefixes,
+      generated_skus: generatedSkus,
       target_color: targetColor,
       target_size: targetSize,
     });
   };
 
   const isDisabled =
-    uploadedFiles.length === 0 ||
-    !analysisResult ||
     selectedPrefixes.length === 0 ||
     processMutation.isPending;
 
@@ -147,7 +196,16 @@ export function ProcessButton() {
           </svg>
           <span>
             生成 Excel 文件
-            {uploadedFiles.length > 1 && ` (${uploadedFiles.length} 个文件)`}
+            {(() => {
+              const dataFiles = uploadedFiles.filter(filename => {
+                const lower = filename.toLowerCase();
+                return !(lower.includes('模板') || lower.includes('模版') || lower.includes('template'));
+              });
+              if (uploadedFiles.length === 0) {
+                return ' (固定数据文件)';
+              }
+              return dataFiles.length > 1 ? ` (${dataFiles.length} 个数据文件)` : '';
+            })()}
           </span>
         </span>
       )}

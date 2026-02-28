@@ -7,12 +7,21 @@ import type {
   ColorMappingResponse,
   ColorMappingSearchResponse,
 } from '../types/api';
+import fallbackColorMappings from '../data/colorMapping';
 
 export const mappingApi = {
   // 获取所有颜色映射
   getAll: async (): Promise<ColorMapping> => {
-    const { data } = await apiClient.get<ColorMappingResponse>('/api/mapping');
-    return data.data || {};
+    try {
+      const { data } = await apiClient.get<ColorMappingResponse>('/api/mapping');
+      const mappings = data.data || {};
+      if (Object.keys(mappings).length > 0) {
+        return mappings;
+      }
+      return fallbackColorMappings;
+    } catch {
+      return fallbackColorMappings;
+    }
   },
 
   // 搜索颜色映射

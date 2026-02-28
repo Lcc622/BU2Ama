@@ -2,24 +2,108 @@
 Excel 处理 API 路由
 """
 import os
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
 from app.config import UPLOADS_DIR, TEMPLATES
 from app.core.excel_processor import excel_processor
+from app.core.follow_sell_processor import follow_sell_processor
 from app.models.excel import (
     AnalysisResult,
     ProcessRequest,
     ProcessResponse,
+    ProcessAsyncStartResponse,
+    ProcessJobStatusResponse,
     TemplateInfo,
-    FileInfo
+    FileInfo,
+    SKCQueryRequest,
+    SKCQueryResponse,
+    SKCProcessRequest,
+    SKCProcessResponse,
+    SKCBatchProcessRequest,
+    SKCBatchProcessResponse,
 )
 
 router = APIRouter(prefix="/api", tags=["Excel 处理"])
+
+_process_executor = ThreadPoolExecutor(max_workers=max(2, int(os.getenv("PROCESS_WORKERS", "4"))))
+_process_jobs: Dict[str, Dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _run_process_job(job_id: str, request: ProcessRequest) -> None:
+    started_at = datetime.now().timestamp()
+    with _jobs_lock:
+        job = _process_jobs.get(job_id)
+        if job is not None:
+            queued_seconds = max(0.0, started_at - job.get("created_at", started_at))
+            job.update({
+                "status": "running",
+                "message": f"处理中（排队 {queued_seconds:.1f}s 后开始）",
+                "started_at": started_at,
+                "queued_seconds": queued_seconds,
+                "last_progress_at": started_at,
+            })
+
+    def progress_update(message: str) -> None:
+        with _jobs_lock:
+            job = _process_jobs.get(job_id)
+            if job is None:
+                return
+            if job.get("status") == "running":
+                job["message"] = message
+                job["last_progress_at"] = datetime.now().timestamp()
+
+    try:
+        output_filename, processed_count = excel_processor.process_excel(
+            template_type=request.template_type,
+            filenames=request.filenames,
+            selected_prefixes=request.selected_prefixes,
+            generated_skus=request.generated_skus,
+            target_color=request.target_color,
+            target_size=request.target_size,
+            progress_callback=progress_update,
+        )
+        with _jobs_lock:
+            finished_at = datetime.now().timestamp()
+            _process_jobs[job_id].update({
+                "status": "completed",
+                "output_filename": output_filename,
+                "processed_count": processed_count,
+                "message": "处理完成",
+                "error": None,
+                "completed_at": finished_at,
+                "run_seconds": max(0.0, finished_at - _process_jobs[job_id].get("started_at", finished_at)),
+            })
+    except Exception as e:
+        with _jobs_lock:
+            failed_at = datetime.now().timestamp()
+            _process_jobs[job_id].update({
+                "status": "failed",
+                "error": str(e),
+                "message": "处理失败",
+                "failed_at": failed_at,
+                "run_seconds": max(0.0, failed_at - _process_jobs[job_id].get("started_at", failed_at)),
+            })
+
+
+def _resolve_follow_sell_source_files() -> List[str]:
+    source_files = [name for name in ["EP-2.xlsm", "EP-0.xlsm", "EP-1.xlsm"] if (UPLOADS_DIR / name).exists()]
+    txt_files = sorted(
+        [p.name for p in UPLOADS_DIR.glob("*.txt") if p.is_file()],
+        key=lambda filename: (UPLOADS_DIR / filename).stat().st_mtime,
+        reverse=True,
+    )
+    if txt_files:
+        source_files.append(txt_files[0])
+    return source_files
 
 
 @router.get("/templates", response_model=List[TemplateInfo])
@@ -45,8 +129,40 @@ async def analyze_file(file: UploadFile = File(...)):
             content = await file.read()
             f.write(content)
 
+        # .txt 价格报告只需要上传保存，不做 Excel 分析
+        if str(file.filename).lower().endswith('.txt'):
+            return AnalysisResult(
+                success=True,
+                filename=file.filename,
+                total_skus=0,
+                unique_colors=0,
+                color_distribution=[],
+                unknown_colors=[],
+                prefixes=[],
+                suffixes=[],
+            )
+
         # 分析文件
         result = excel_processor.analyze_excel_file(file.filename)
+        return result
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析文件失败: {str(e)}")
+
+
+@router.post("/analyze-existing", response_model=AnalysisResult)
+async def analyze_existing_file(filename: str):
+    """分析服务器上已存在的文件"""
+    try:
+        # 检查文件是否存在
+        file_path = UPLOADS_DIR / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"文件不存在: {filename}")
+
+        # 分析文件
+        result = excel_processor.analyze_excel_file(filename)
         return result
 
     except FileNotFoundError as e:
@@ -63,6 +179,7 @@ async def process_excel(request: ProcessRequest):
             template_type=request.template_type,
             filenames=request.filenames,
             selected_prefixes=request.selected_prefixes,
+            generated_skus=request.generated_skus,
             target_color=request.target_color,
             target_size=request.target_size
         )
@@ -80,6 +197,80 @@ async def process_excel(request: ProcessRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"处理文件失败: {str(e)}")
+
+
+@router.post("/process-async", response_model=ProcessAsyncStartResponse)
+async def process_excel_async(request: ProcessRequest):
+    """异步处理 Excel 文件并返回任务 ID"""
+    job_id = uuid.uuid4().hex
+    with _jobs_lock:
+        _process_jobs[job_id] = {
+            "status": "queued",
+            "output_filename": None,
+            "processed_count": 0,
+            "message": "任务排队中",
+            "error": None,
+            "created_at": datetime.now().timestamp(),
+        }
+    _process_executor.submit(_run_process_job, job_id, request)
+
+    return ProcessAsyncStartResponse(
+        success=True,
+        job_id=job_id,
+        message="任务已提交"
+    )
+
+
+@router.get("/process-status/{job_id}", response_model=ProcessJobStatusResponse)
+async def get_process_status(job_id: str):
+    """查询异步处理任务状态"""
+    with _jobs_lock:
+        job = _process_jobs.get(job_id)
+        queue_position = 0
+        if job and job.get("status") == "queued":
+            created_at = float(job.get("created_at", 0))
+            queue_position = sum(
+                1
+                for other_id, other in _process_jobs.items()
+                if other_id != job_id
+                and other.get("status") == "queued"
+                and float(other.get("created_at", 0)) < created_at
+            )
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {job_id}")
+
+    message = job.get("message")
+    if job.get("status") == "queued":
+        if queue_position > 0:
+            message = f"任务排队中，前方 {queue_position} 个任务"
+        else:
+            message = "任务排队中，即将开始"
+    elif job.get("status") == "completed":
+        run_seconds = job.get("run_seconds")
+        queued_seconds = job.get("queued_seconds")
+        if run_seconds is not None and queued_seconds is not None:
+            message = f"处理完成（排队 {queued_seconds:.1f}s，执行 {run_seconds:.1f}s）"
+    elif job.get("status") == "failed":
+        run_seconds = job.get("run_seconds")
+        if run_seconds is not None:
+            message = f"处理失败（执行 {run_seconds:.1f}s）"
+    elif job.get("status") == "running":
+        last_progress_at = job.get("last_progress_at")
+        if last_progress_at is not None:
+            idle_seconds = max(0.0, datetime.now().timestamp() - float(last_progress_at))
+            if idle_seconds >= 5:
+                message = f"{message}（当前步骤已运行 {idle_seconds:.1f}s）"
+
+    return ProcessJobStatusResponse(
+        success=True,
+        job_id=job_id,
+        status=job["status"],
+        output_filename=job.get("output_filename"),
+        processed_count=job.get("processed_count", 0),
+        message=message,
+        error=job.get("error"),
+    )
 
 
 @router.get("/download/{filename}")
@@ -128,3 +319,138 @@ async def delete_file(filename: str):
         return {"success": True, "message": f"文件 {filename} 已删除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
+
+
+@router.post("/follow-sell/query-skc", response_model=SKCQueryResponse)
+async def query_skc(request: SKCQueryRequest):
+    """查询 SKC 对应的所有尺码信息
+
+    根据输入的 SKC（7位款号+2位颜色），通过新老款映射表查找老款号，
+    然后在 EP-0/1/2 聚合表中查找所有尺码信息
+    """
+    try:
+        result = follow_sell_processor.find_sizes_for_skc(request.skc)
+        return SKCQueryResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询 SKC 失败: {str(e)}")
+
+
+@router.post("/follow-sell/process-skc", response_model=SKCProcessResponse)
+async def process_skc(request: SKCProcessRequest):
+    """根据 SKC 自动匹配老款尺码并导出模板 Excel"""
+    try:
+        query_result = follow_sell_processor.find_sizes_for_skc(request.skc)
+        if not query_result.get("success"):
+            raise HTTPException(status_code=400, detail=query_result.get("message", "SKC 查询失败"))
+
+        generated_skus = [str(item.get("sku", "")).strip().upper() for item in query_result.get("sizes", []) if item.get("sku")]
+        generated_skus = [sku for sku in generated_skus if len(sku) >= 11]
+        if not generated_skus:
+            raise HTTPException(status_code=400, detail="未生成有效 SKU，无法导出")
+
+        source_files = _resolve_follow_sell_source_files()
+
+        if len(source_files) < 3:
+            raise HTTPException(status_code=400, detail="缺少 EP-0/1/2 数据文件，无法导出")
+
+        output_filename, _processed_count = excel_processor.process_excel(
+            template_type=request.template_type,
+            filenames=source_files,
+            selected_prefixes=[query_result["new_style"]],
+            generated_skus=generated_skus,
+            target_color=None,
+            target_size=None,
+            source_style_map={query_result["new_style"]: query_result["old_style"]},
+            clear_image_urls=True,
+            follow_sell_mode=True,
+        )
+
+        return SKCProcessResponse(
+            success=True,
+            skc=query_result["skc"],
+            new_style=query_result["new_style"],
+            old_style=query_result["old_style"],
+            total_skus=len(generated_skus),
+            output_filename=output_filename,
+            message=f"导出成功，共生成 {len(generated_skus)} 个 SKU",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"处理 SKC 失败: {str(e)}")
+
+
+@router.post("/follow-sell/process-skc-batch", response_model=SKCBatchProcessResponse)
+async def process_skc_batch(request: SKCBatchProcessRequest):
+    """根据多条 SKC 批量匹配并合并导出一个模板 Excel"""
+    try:
+        normalized_skcs = list({
+            str(item).strip().upper()
+            for item in request.skcs
+            if str(item).strip()
+        })
+        if not normalized_skcs:
+            raise HTTPException(status_code=400, detail="请至少提供一条有效 SKC")
+
+        success_results = []
+        failed_count = 0
+        for skc in normalized_skcs:
+            result = follow_sell_processor.find_sizes_for_skc(skc)
+            if result.get("success"):
+                success_results.append(result)
+            else:
+                failed_count += 1
+
+        if not success_results:
+            raise HTTPException(status_code=400, detail="所有 SKC 均匹配失败，无法导出")
+
+        generated_skus: List[str] = []
+        selected_prefixes: List[str] = []
+        seen = set()
+        for result in success_results:
+            style = result.get("new_style", "")
+            if style and style not in selected_prefixes:
+                selected_prefixes.append(style)
+            for item in result.get("sizes", []):
+                sku = str(item.get("sku", "")).strip().upper()
+                if len(sku) >= 11 and sku not in seen:
+                    seen.add(sku)
+                    generated_skus.append(sku)
+
+        if not generated_skus:
+            raise HTTPException(status_code=400, detail="未生成有效 SKU，无法导出")
+
+        source_files = _resolve_follow_sell_source_files()
+        if len(source_files) < 3:
+            raise HTTPException(status_code=400, detail="缺少 EP-0/1/2 数据文件，无法导出")
+
+        output_filename, _processed_count = excel_processor.process_excel(
+            template_type=request.template_type,
+            filenames=source_files,
+            selected_prefixes=selected_prefixes,
+            generated_skus=generated_skus,
+            target_color=None,
+            target_size=None,
+            source_style_map={
+                str(result.get("new_style", "")).strip().upper(): str(result.get("old_style", "")).strip().upper()
+                for result in success_results
+                if result.get("new_style") and result.get("old_style")
+            },
+            clear_image_urls=True,
+            follow_sell_mode=True,
+        )
+
+        return SKCBatchProcessResponse(
+            success=True,
+            total_input_skcs=len(normalized_skcs),
+            success_skcs=len(success_results),
+            failed_skcs=failed_count,
+            total_skus=len(generated_skus),
+            output_filename=output_filename,
+            message=f"批量导出成功：SKC 成功 {len(success_results)}，失败 {failed_count}，SKU 共 {len(generated_skus)}",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"批量处理 SKC 失败: {str(e)}")
+

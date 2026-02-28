@@ -1,259 +1,241 @@
 import React, { useState } from 'react';
-import { Upload, FileText, Download, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { useFollowSellStore } from '@/store/useFollowSellStore';
-import { followsellApi } from '@/services/followsellApi';
+import { AlertCircle } from 'lucide-react';
+import { excelApi } from '@/services/excelApi';
+import type { SKCQueryResponse } from '@/types/api';
+
+type SKCQueryItem = {
+  inputSkc: string;
+  result: SKCQueryResponse;
+};
 
 export const FollowSellUpload: React.FC = () => {
-  const {
-    uploadedFile,
-    newProductCode,
-    processing,
-    result,
-    error,
-    setUploadedFile,
-    setNewProductCode,
-    setProcessing,
-    setResult,
-    setError,
-    reset,
-  } = useFollowSellStore();
+  const [skcInput, setSkcInput] = useState('');
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryResults, setQueryResults] = useState<SKCQueryItem[]>([]);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [exportingSkc, setExportingSkc] = useState<string | null>(null);
+  const [batchExporting, setBatchExporting] = useState(false);
 
-  const [dragActive, setDragActive] = useState(false);
-
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileChange(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileChange = (file: File) => {
-    // 验证文件格式
-    const validExtensions = ['.xlsx', '.xlsm', '.xls'];
-    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-    if (!validExtensions.includes(fileExtension)) {
-      setError('不支持的文件格式，请上传 .xlsx、.xlsm 或 .xls 文件');
+  const handleSkcQuery = async () => {
+    if (!skcInput.trim()) {
+      setQueryError('请输入至少 1 条 SKC（7位款号+2位颜色）');
+      setQueryResults([]);
       return;
     }
 
-    setUploadedFile(file);
-  };
+    const skcList = Array.from(
+      new Set(
+        skcInput
+          .toUpperCase()
+          .split(/[\n,，\s]+/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+    );
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileChange(e.target.files[0]);
-    }
-  };
-
-  const handleProcess = async () => {
-    if (!uploadedFile) {
-      setError('请先上传老版本 Excel 文件');
+    if (skcList.length === 0) {
+      setQueryError('请输入至少 1 条有效 SKC');
+      setQueryResults([]);
       return;
     }
 
-    if (!newProductCode || newProductCode.length < 7) {
-      setError('请输入有效的产品代码（7-8位字符）');
-      return;
-    }
-
-    setProcessing(true);
-    setError(null);
+    setQueryLoading(true);
+    setQueryError(null);
+    setQueryResults([]);
 
     try {
-      const response = await followsellApi.process(uploadedFile, newProductCode);
+      const settled = await Promise.allSettled(
+        skcList.map(async (skc) => {
+          const result = await excelApi.queryFollowSellSkc(skc);
+          return { inputSkc: skc, result };
+        })
+      );
 
-      if (response.success) {
-        setResult(response.data);
+      const merged: SKCQueryItem[] = settled.map((item, index) => {
+        if (item.status === 'fulfilled') {
+          return item.value;
+        }
+
+        return {
+          inputSkc: skcList[index],
+          result: {
+            success: false,
+            skc: skcList[index],
+            new_style: '',
+            old_style: '',
+            color_code: '',
+            sizes: [],
+            message: item.reason?.response?.data?.detail || item.reason?.message || '查询失败',
+          },
+        };
+      });
+
+      setQueryResults(merged);
+    } catch (err: any) {
+      setQueryError(err.response?.data?.detail || err.message || '查询失败，请重试');
+    } finally {
+      setQueryLoading(false);
+    }
+  };
+
+  const triggerDownloadByFilename = (filename: string) => {
+    const url = excelApi.getDownloadUrl(filename);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleExportSingleSkc = async (skc: string) => {
+    setExportingSkc(skc);
+    setQueryError(null);
+    try {
+      const response = await excelApi.processFollowSellSkc(skc, 'EPUS');
+      if (response.success && response.output_filename) {
+        triggerDownloadByFilename(response.output_filename);
       } else {
-        setError(response.message || '处理失败');
+        setQueryError(response.message || `导出 ${skc} 失败`);
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || '处理失败，请重试');
+      setQueryError(err.response?.data?.detail || err.message || `导出 ${skc} 失败`);
     } finally {
-      setProcessing(false);
+      setExportingSkc(null);
     }
   };
 
-  const handleDownload = async () => {
-    if (!result) return;
+  const handleBatchExport = async () => {
+    const successSkcs = queryResults
+      .filter((item) => item.result.success)
+      .map((item) => item.inputSkc);
+    if (successSkcs.length === 0) {
+      setQueryError('没有可导出的成功 SKC');
+      return;
+    }
 
+    setBatchExporting(true);
+    setQueryError(null);
     try {
-      const blob = await followsellApi.download(result.outputFilename);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.outputFilename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      const response = await excelApi.processFollowSellSkcBatch(successSkcs, 'EPUS');
+      if (response.success && response.output_filename) {
+        triggerDownloadByFilename(response.output_filename);
+      } else {
+        setQueryError(response.message || '合并导出失败');
+      }
     } catch (err: any) {
-      setError('下载失败，请重试');
+      setQueryError(err.response?.data?.detail || err.message || '合并导出失败');
+    } finally {
+      setBatchExporting(false);
     }
-  };
-
-  const handleReset = () => {
-    reset();
   };
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-2xl font-bold mb-6">跟卖上新</h2>
+        <h2 className="text-2xl font-bold mb-6">SKC 尺码查询（跟卖映射）</h2>
 
-        {/* 文件上传区域 */}
-        <div className="mb-6">
+        <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            📤 上传老版本 Excel
+            🔎 输入 SKC（支持多条，换行/逗号分隔）
           </label>
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              dragActive
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-300 hover:border-gray-400'
-            }`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-          >
-            <input
-              type="file"
-              id="file-upload"
-              className="hidden"
-              accept=".xlsx,.xlsm,.xls"
-              onChange={handleFileInputChange}
-              disabled={processing}
+          <div className="flex gap-3">
+            <textarea
+              value={skcInput}
+              onChange={(e) => setSkcInput(e.target.value.toUpperCase())}
+              placeholder={'例如:\nEE00756DB\nES02522BK'}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[104px]"
+              maxLength={2000}
+              disabled={queryLoading}
             />
-            <label
-              htmlFor="file-upload"
-              className="cursor-pointer flex flex-col items-center"
-            >
-              <Upload className="w-12 h-12 text-gray-400 mb-3" />
-              <p className="text-sm text-gray-600 mb-1">
-                点击选择文件或拖拽文件到此处
-              </p>
-              <p className="text-xs text-gray-500">
-                支持 .xlsx、.xlsm、.xls 格式
-              </p>
-            </label>
-          </div>
-
-          {uploadedFile && (
-            <div className="mt-3 flex items-center text-sm text-gray-600">
-              <FileText className="w-4 h-4 mr-2" />
-              <span>{uploadedFile.name}</span>
-              <span className="ml-2 text-gray-400">
-                ({(uploadedFile.size / 1024 / 1024).toFixed(2)} MB)
-              </span>
+            <div className="flex items-start">
+              <button
+                onClick={handleSkcQuery}
+                disabled={queryLoading || !skcInput.trim()}
+                className={`px-5 py-2 rounded-lg font-medium transition-colors ${
+                  queryLoading || !skcInput.trim()
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                {queryLoading ? '查询中...' : '批量查询尺码'}
+              </button>
             </div>
-          )}
+          </div>
+          <p className="mt-1 text-xs text-gray-500">按每条 SKC 自动查新老款映射，再到 EP-0/1/2 聚合表提取全部尺码</p>
         </div>
 
-        {/* 产品代码输入 */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            ✏️ 输入新产品代码
-          </label>
-          <input
-            type="text"
-            value={newProductCode}
-            onChange={(e) => setNewProductCode(e.target.value.toUpperCase())}
-            placeholder="例如: ES01846"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            disabled={processing}
-            maxLength={8}
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            产品代码长度为 7-8 位字符
-          </p>
-        </div>
-
-        {/* 提示信息 */}
-        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm font-medium text-blue-800 mb-2">ℹ️ 系统将自动：</p>
-          <ul className="text-sm text-blue-700 space-y-1 ml-4">
-            <li>• 识别老产品代码并替换</li>
-            <li>• 价格 -0.1 美元</li>
-            <li>• 更新日期（3PM 规则）</li>
-            <li>• 清空图片字段</li>
-            <li>• 保持 ASIN 不变（跟卖核心）</li>
-          </ul>
-        </div>
-
-        {/* 错误提示 */}
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
+        {queryError && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
             <AlertCircle className="w-5 h-5 text-red-500 mr-3 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{error}</p>
+            <p className="text-sm text-red-700">{queryError}</p>
           </div>
         )}
 
-        {/* 处理按钮 */}
-        {!result && (
-          <button
-            onClick={handleProcess}
-            disabled={processing || !uploadedFile || !newProductCode}
-            className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
-              processing || !uploadedFile || !newProductCode
-                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
-            {processing ? '处理中...' : '生成跟卖表'}
-          </button>
-        )}
-
-        {/* 处理结果 */}
-        {result && (
+        {queryResults.length > 0 && (
           <div className="space-y-4">
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="flex items-start">
-                <CheckCircle2 className="w-5 h-5 text-green-500 mr-3 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-green-800 mb-2">
-                    ✅ 处理完成！
+            <div className="flex justify-end">
+              <button
+                onClick={handleBatchExport}
+                disabled={batchExporting || queryResults.every((item) => !item.result.success)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  batchExporting || queryResults.every((item) => !item.result.success)
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                }`}
+              >
+                {batchExporting ? '合并导出中...' : '导出全部成功 SKC（一个 Excel）'}
+              </button>
+            </div>
+            {queryResults.map(({ inputSkc, result }) => (
+              <div
+                key={`${inputSkc}-${result.message}`}
+                className={`rounded-lg border p-4 ${result.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <p className={`text-sm ${result.success ? 'text-green-800' : 'text-red-700'}`}>
+                    SKC: {inputSkc} | {result.message}
+                    {result.success && ` | 新款号: ${result.new_style} | 老款号: ${result.old_style} | 颜色: ${result.color_code}`}
                   </p>
-                  <div className="text-sm text-green-700 space-y-1">
-                    <p>• 处理了 {result.totalSkus} 个 SKU</p>
-                    <p>• 老产品代码: {result.oldProductCode}</p>
-                    <p>• 新产品代码: {result.newProductCode}</p>
-                    <p>• 价格调整: {result.priceAdjustment} 美元</p>
-                    <p>• 使用日期: {result.dateUsed}</p>
-                  </div>
+                  {result.success && (
+                    <button
+                      onClick={() => handleExportSingleSkc(inputSkc)}
+                      disabled={exportingSkc === inputSkc || batchExporting}
+                      className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                        exportingSkc === inputSkc || batchExporting
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                      }`}
+                    >
+                      {exportingSkc === inputSkc ? '导出中...' : '导出该 SKC'}
+                    </button>
+                  )}
                 </div>
-              </div>
-            </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={handleDownload}
-                className="flex-1 py-3 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center"
-              >
-                <Download className="w-5 h-5 mr-2" />
-                下载新版本 Excel
-              </button>
-              <button
-                onClick={handleReset}
-                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-              >
-                重新处理
-              </button>
-            </div>
+                {result.success && (
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg bg-white">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">尺码</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">后缀</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">生成 SKU</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {result.sizes.map((item) => (
+                          <tr key={`${inputSkc}-${item.size}-${item.suffix}-${item.sku}`}>
+                            <td className="px-4 py-2 text-sm text-gray-700">{item.size}</td>
+                            <td className="px-4 py-2 text-sm text-gray-700">{item.suffix || '-'}</td>
+                            <td className="px-4 py-2 text-sm font-mono text-gray-900">{item.sku}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>

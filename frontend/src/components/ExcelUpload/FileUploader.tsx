@@ -1,7 +1,7 @@
 /**
  * 文件上传组件 - 支持多文件上传
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { excelApi } from '../../services/excelApi';
 import { useUploadStore } from '../../store/useUploadStore';
@@ -12,17 +12,58 @@ export function FileUploader() {
   const [isDragging, setIsDragging] = useState(false);
   const uploadedFiles = useUploadStore((state) => state.uploadedFiles);
   const addUploadedFile = useUploadStore((state) => state.addUploadedFile);
-  const removeUploadedFile = useUploadStore((state) => state.removeUploadedFile);
-  const setAnalysisResult = useUploadStore((state) => state.setAnalysisResult);
+  const clearUploadedFiles = useUploadStore((state) => state.clearUploadedFiles);
+
+  // 页面加载时检查服务器上已有的固定数据文件（不执行分析）
+  useEffect(() => {
+    const loadServerFiles = async () => {
+      try {
+        const files = await excelApi.listFiles();
+
+        // 固定的数据文件列表
+        const targetFiles = [
+          'EP-0.xlsm',
+          'EP-1.xlsm',
+          'EP-2.xlsm',
+        ];
+
+        // 过滤出存在的目标文件
+        const existingFiles = files.filter((file) => {
+          if (targetFiles.includes(file.filename)) return true;
+          const lower = file.filename.toLowerCase();
+          return lower.startsWith('all+listings+report') && lower.endsWith('.txt');
+        });
+
+        if (existingFiles.length > 0) {
+          clearUploadedFiles();
+          existingFiles.forEach(file => {
+            addUploadedFile(file.filename);
+          });
+          toast.success(`已加载 ${existingFiles.length} 个数据文件`);
+        } else {
+          toast.error('未找到固定数据文件，请先上传 EP-0/EP-1/EP-2 和价格报告');
+        }
+      } catch (err) {
+        console.error('加载服务器文件失败:', err);
+        toast.error('加载服务器文件失败');
+      }
+    };
+
+    loadServerFiles();
+  }, []); // 只在组件挂载时执行一次
 
   const uploadMutation = useMutation({
-    mutationFn: excelApi.analyzeFile,
-    onSuccess: (data: AnalysisResult) => {
-      addUploadedFile(data.filename);
-      // 如果是第一个文件，直接设置分析结果
-      // 如果是后续文件，需要合并分析结果
-      setAnalysisResult(data);
-      toast.success(`文件 ${data.filename} 上传成功！`);
+    mutationFn: async (files: File[]): Promise<AnalysisResult[]> => {
+      const results: AnalysisResult[] = [];
+      for (const file of files) {
+        const data = await excelApi.analyzeFile(file);
+        results.push(data);
+      }
+      return results;
+    },
+    onSuccess: (results: AnalysisResult[]) => {
+      results.forEach((item) => addUploadedFile(item.filename));
+      toast.success(`上传完成：${results.length} 个文件`);
     },
     onError: (error: Error) => {
       toast.error(`上传失败: ${error.message}`);
@@ -44,18 +85,20 @@ export function FileUploader() {
     setIsDragging(false);
 
     const files = Array.from(e.dataTransfer.files);
-    const excelFiles = files.filter(
-      (file) =>
-        file.name.endsWith('.xlsx') ||
-        file.name.endsWith('.xlsm') ||
-        file.name.endsWith('.xls')
-    );
+    const allowedFiles = files.filter((file) => {
+      const lower = file.name.toLowerCase();
+      return (
+        lower.endsWith('.xlsx') ||
+        lower.endsWith('.xlsm') ||
+        lower.endsWith('.xls') ||
+        lower.endsWith('.txt')
+      );
+    });
 
-    if (excelFiles.length > 0) {
-      // 上传第一个文件
-      uploadMutation.mutate(excelFiles[0]);
+    if (allowedFiles.length > 0) {
+      uploadMutation.mutate(allowedFiles);
     } else {
-      toast.error('请上传 Excel 文件（.xlsx, .xlsm, .xls）');
+      toast.error('请上传数据文件（.xlsx, .xlsm, .xls, .txt）');
     }
   }, [uploadMutation]);
 
@@ -63,22 +106,25 @@ export function FileUploader() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (files && files.length > 0) {
-        // 支持多文件选择，但一次只上传一个
-        uploadMutation.mutate(files[0]);
+        const selectedFiles = Array.from(files).filter((file) => {
+          const lower = file.name.toLowerCase();
+          return (
+            lower.endsWith('.xlsx') ||
+            lower.endsWith('.xlsm') ||
+            lower.endsWith('.xls') ||
+            lower.endsWith('.txt')
+          );
+        });
+        if (selectedFiles.length > 0) {
+          uploadMutation.mutate(selectedFiles);
+        } else {
+          toast.error('请上传数据文件（.xlsx, .xlsm, .xls, .txt）');
+        }
       }
       // 清空 input 以允许重复上传同一文件
       e.target.value = '';
     },
     [uploadMutation]
-  );
-
-  const handleRemoveFile = useCallback(
-    (filename: string) => {
-      removeUploadedFile(filename);
-      // 如果删除的是当前分析的文件，清空分析结果
-      setAnalysisResult(null);
-    },
-    [removeUploadedFile, setAnalysisResult]
   );
 
   return (
@@ -96,7 +142,7 @@ export function FileUploader() {
         <input
           type="file"
           id="file-upload"
-          accept=".xlsx,.xlsm,.xls"
+          accept=".xlsx,.xlsm,.xls,.txt"
           onChange={handleFileSelect}
           className="hidden"
           disabled={uploadMutation.isPending}
@@ -143,67 +189,15 @@ export function FileUploader() {
           </div>
 
           <div className="text-xs text-slate-500">
-            支持 .xlsx, .xlsm, .xls 格式 | 可多次上传
+            支持 .xlsx, .xlsm, .xls, .txt | 可多次上传（可更新 EP-0/1/2 和 All+Listings+Report）
           </div>
         </label>
       </div>
 
-      {/* 已上传文件列表 */}
+      {/* 已上传文件：仅展示计数 */}
       {uploadedFiles.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-700">
-              已上传文件
-            </div>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
-              {uploadedFiles.length} 个文件
-            </span>
-          </div>
-          <div className="space-y-2">
-            {uploadedFiles.map((filename) => (
-              <div
-                key={filename}
-                className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors duration-150"
-              >
-                <div className="flex items-center space-x-2 flex-1 min-w-0">
-                  <svg
-                    className="w-5 h-5 text-green-500 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span className="text-sm text-slate-700 truncate">{filename}</span>
-                </div>
-                <button
-                  onClick={() => handleRemoveFile(filename)}
-                  className="ml-2 p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors duration-150 flex-shrink-0"
-                  title="删除"
-                  aria-label={`删除 ${filename}`}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          已加载 {uploadedFiles.length} 个数据文件
         </div>
       )}
 

@@ -59,7 +59,15 @@ export const useProcessStore = create<ProcessStore>((set, get) => ({
   setProductPrefix: (prefix) => set({ productPrefix: prefix }),
 
   mode: 'add-color',
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) =>
+    set((state) => {
+      if (state.mode === mode) return state;
+      return {
+        mode,
+        // 模式切换时清空颜色输入，避免跨模式残留
+        colorList: '',
+      };
+    }),
 
   startSize: '',
   setStartSize: (size) => set({ startSize: size }),
@@ -92,9 +100,24 @@ export const useProcessStore = create<ProcessStore>((set, get) => ({
     if (!productPrefix) return [];
 
     if (mode === 'add-color') {
-      // 加色模式：一个颜色 × 多个尺码
+      // 加色模式：多个颜色 × 一个尺码
       const colors = colorList
-        .split(/[,，\s]+/)
+        .split(/[,，、;；\s]+/)
+        .map((c) => c.trim().toUpperCase())
+        .filter((c) => c.length === 2);
+
+      if (colors.length === 0) return [];
+
+      const size = parseInt(startSize, 10);
+      if (isNaN(size)) return [];
+
+      const sizeStr = size.toString().padStart(2, '0');
+
+      return colors.map((color) => `${productPrefix}${color}${sizeStr}`);
+    } else {
+      // 加码模式：一个颜色 × 多个尺码
+      const colors = colorList
+        .split(/[,，、;；\s]+/)
         .map((c) => c.trim().toUpperCase())
         .filter((c) => c.length === 2);
 
@@ -114,21 +137,6 @@ export const useProcessStore = create<ProcessStore>((set, get) => ({
       }
 
       return skus;
-    } else {
-      // 加码模式：多个颜色 × 一个尺码
-      const colors = colorList
-        .split(/[,，\s]+/)
-        .map((c) => c.trim().toUpperCase())
-        .filter((c) => c.length === 2);
-
-      if (colors.length === 0) return [];
-
-      const size = parseInt(startSize, 10);
-      if (isNaN(size)) return [];
-
-      const sizeStr = size.toString().padStart(2, '0');
-
-      return colors.map((color) => `${productPrefix}${color}${sizeStr}`);
     }
   },
 
