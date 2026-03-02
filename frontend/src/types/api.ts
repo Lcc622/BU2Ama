@@ -42,6 +42,7 @@ export interface ProcessRequest {
   template_type: string;
   filenames: string[];
   selected_prefixes: string[];
+  mode?: 'add-color' | 'add-code' | string;
   generated_skus?: string[];
   target_color?: string | null;
   target_size?: string | null;
@@ -119,4 +120,24 @@ export interface SKCBatchProcessResponse {
   total_skus: number;
   output_filename?: string;
   message: string;
+}
+
+export interface ExportHistoryItem {
+  id: number;
+  module: 'follow-sell' | 'add-color' | 'add-code';
+  template_type: string;
+  input_data: any;
+  filename: string;
+  file_size: number;
+  processed_count: number;
+  status: 'success' | 'failed' | 'file_missing';
+  created_at: string;
+}
+
+export interface ExportHistoryResponse {
+  success: boolean;
+  data: ExportHistoryItem[];
+  total: number;
+  page: number;
+  page_size: number;
 }

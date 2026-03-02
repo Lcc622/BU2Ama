@@ -38,6 +38,7 @@ class ProcessRequest(BaseModel):
     template_type: str = Field(..., description="模板类型：DaMaUS 或 EPUS")
     filenames: List[str] = Field(..., description="要处理的文件名列表")
     selected_prefixes: List[str] = Field(..., description="选中的 SKU 前缀列表")
+    mode: Optional[str] = Field("add-color", description="处理模式：add-color / add-code")
     generated_skus: Optional[List[str]] = Field(None, description="前端拼接生成的目标 SKU 列表")
     target_color: Optional[str] = Field(None, description="目标颜色代码（用于换色）")
     target_size: Optional[str] = Field(None, description="目标尺码（用于加码）")
@@ -138,3 +139,47 @@ class SKCBatchProcessResponse(BaseModel):
     total_skus: int
     output_filename: Optional[str] = None
     message: str
+
+
+class FollowSellHistoryItem(BaseModel):
+    """跟卖历史记录项"""
+    id: int
+    skc: str
+    new_style: str
+    old_style: str
+    color_code: str
+    filename: str
+    file_size: int
+    status: str
+    created_at: str
+
+
+class FollowSellHistoryResponse(BaseModel):
+    """跟卖历史记录列表响应"""
+    success: bool
+    data: List[FollowSellHistoryItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class ExportHistoryItem(BaseModel):
+    """通用导出历史记录项"""
+    id: int
+    module: str
+    template_type: str
+    input_data: Dict
+    filename: str
+    file_size: int
+    processed_count: int
+    status: str
+    created_at: str
+
+
+class ExportHistoryResponse(BaseModel):
+    """通用导出历史记录列表响应"""
+    success: bool
+    data: List[ExportHistoryItem]
+    total: int
+    page: int
+    page_size: int

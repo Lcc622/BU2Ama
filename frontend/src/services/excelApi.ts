@@ -13,6 +13,7 @@ import type {
   SKCQueryResponse,
   SKCProcessResponse,
   SKCBatchProcessResponse,
+  ExportHistoryResponse,
 } from '../types/api';
 
 export const excelApi = {
@@ -114,5 +115,32 @@ export const excelApi = {
       { skcs, template_type: templateType }
     );
     return data;
+  },
+
+  // 获取导出历史
+  getExportHistory: async (
+    page = 1,
+    pageSize = 20,
+    module?: string,
+    search?: string
+  ): Promise<ExportHistoryResponse> => {
+    const params = {
+      page,
+      page_size: pageSize,
+      ...(module && { module }),
+      ...(search && { search }),
+    };
+    const { data } = await apiClient.get<ExportHistoryResponse>('/api/export-history', { params });
+    return data;
+  },
+
+  // 下载历史文件
+  downloadExportHistory: (id: number): string => {
+    return `${apiClient.defaults.baseURL}/api/export-history/${id}/download`;
+  },
+
+  // 删除历史记录
+  deleteExportHistory: async (id: number): Promise<void> => {
+    await apiClient.delete(`/api/export-history/${id}`);
   },
 };

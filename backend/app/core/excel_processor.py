@@ -983,6 +983,123 @@ class ExcelProcessor:
             # 业务要求：Quantity Price 固定以 .99 结尾
             return round(int(value) + 0.99, 2)
 
+        def normalize_size_display(size_value: Any) -> str:
+            raw = str(size_value).strip()
+            if raw.isdigit():
+                return str(int(raw))
+            return raw
+
+        def replace_us_size_token(text: str, size_value: Any) -> str:
+            size_display = normalize_size_display(size_value)
+            return re.sub(r'\bUS\d{1,2}\b', f'US{size_display}', text, flags=re.IGNORECASE)
+
+        def resolve_color_text(color_code: str) -> str:
+            color_name = color_mapper.get_color_name(color_code)
+            return color_name if color_name else color_code
+
+        def replace_color_whole_words(text: str, source_color_code: str, target_color_code: str, *, lower_target: bool = False) -> str:
+            source_text = resolve_color_text(source_color_code).strip()
+            target_text = resolve_color_text(target_color_code).strip()
+            if not source_text or not target_text:
+                return text
+
+            if lower_target:
+                source_text = source_text.lower()
+                target_text = target_text.lower()
+
+            replaced = re.sub(
+                rf'(?<![A-Za-z0-9]){re.escape(source_text)}(?![A-Za-z0-9])',
+                target_text,
+                text,
+                flags=re.IGNORECASE,
+            )
+
+            # 兼容 mint/light/dark 等前缀颜色词，保持整词匹配
+            base_word = source_text.split()[-1]
+            for prefix in ("mint", "light", "dark", "bright", "deep", "pale"):
+                replaced = re.sub(
+                    rf'(?<![A-Za-z0-9]){prefix}\s+{re.escape(base_word)}(?![A-Za-z0-9])',
+                    target_text,
+                    replaced,
+                    flags=re.IGNORECASE,
+                )
+            return replaced
+
+        def resolve_first_suffix_for_style(style_key: str, default_suffix: str) -> str:
+            upper_style = str(style_key).strip().upper()
+            for (candidate_style, _candidate_suffix), candidate_sku in style_suffix_to_source.items():
+                if candidate_style != upper_style:
+                    continue
+                parsed_candidate = self.parse_sku(candidate_sku)
+                if parsed_candidate and parsed_candidate.suffix:
+                    return parsed_candidate.suffix.upper()
+            style_sku = style_to_source.get(upper_style)
+            parsed_style = self.parse_sku(style_sku) if style_sku else None
+            if parsed_style and parsed_style.suffix:
+                return parsed_style.suffix.upper()
+            if default_suffix:
+                return str(default_suffix).upper()
+            return "-USA"
+
+        def normalize_variation_theme(value: Any, style_code: str, lookup_style_code: str, suffix: str) -> str:
+            text = str(value).strip() if value is not None else ""
+            upper_text = text.upper()
+            if upper_text == "SIZE_NAME/COLOR_NAME (DEPRECATED: DO NOT USE)":
+                return "SizeName-ColorName"
+            if upper_text == "SIZE/COLOR":
+                return "SizeColor"
+            if not text:
+                return f"{style_code}{resolve_first_suffix_for_style(lookup_style_code, suffix)}"
+            return text
+
+        field_aliases: Dict[str, List[str]] = {
+            "key product features": ["Bullet Point", "Special Features", "Features"],
+            "generic keyword": ["Generic Keywords"],
+        }
+
+        def read_source_value(
+            source_headers: Dict[str, List[int]],
+            row_values: List[Any],
+            candidates: List[str],
+            field_used: Optional[Dict[str, int]] = None,
+        ) -> Any:
+            def read_from_field(field_name: str) -> Tuple[Any, bool]:
+                in_key = self._normalize_header(field_name)
+                cols = source_headers.get(in_key, [])
+                if not cols:
+                    return None, False
+
+                if field_used is not None:
+                    in_idx = field_used[in_key]
+                    if in_idx >= len(cols):
+                        in_idx = len(cols) - 1
+                    col_indexes = [cols[in_idx]]
+                    field_used[in_key] += 1
+                else:
+                    col_indexes = cols
+
+                for col_idx in col_indexes:
+                    value = row_values[col_idx - 1] if 0 < col_idx <= len(row_values) else None
+                    if value is not None and str(value).strip() != "":
+                        return value, True
+                return None, True
+
+            for candidate in candidates:
+                value, matched = read_from_field(candidate)
+                if value is not None:
+                    return value
+                if matched:
+                    continue
+
+                for alias in field_aliases.get(self._normalize_header(candidate), []):
+                    alias_value, alias_matched = read_from_field(alias)
+                    if alias_value is not None:
+                        progress(f"字段映射: '{candidate}' 未找到，使用别名 '{alias}' 匹配成功")
+                        return alias_value
+                    if alias_matched:
+                        break
+            return None
+
         # 如果指定了目标颜色，验证颜色是否存在
         target_color_name = None
         if target_color:
@@ -1125,20 +1242,21 @@ class ExcelProcessor:
             progress(f"从源文件筛选 SKU，共 {len(all_skus)} 个")
 
         # 匹配模式识别：
-        # 加色（一色多码）=> 前7位+后2位(size)匹配
-        # 加码（一码多色）=> 前9位(style+color)匹配
+        # 加色（一码多色）=> 前7位+后2位(size)匹配
+        # 加码（一色多码）=> 前9位(style+color)匹配
         parsed_for_mode = [self.parse_sku(s) for s in all_skus]
         parsed_for_mode = [p for p in parsed_for_mode if p]
         unique_colors = {p.color_code for p in parsed_for_mode}
         unique_sizes = {p.size for p in parsed_for_mode}
         match_mode = "mixed"
-        if len(unique_colors) == 1 and len(unique_sizes) > 1:
+        if len(unique_sizes) == 1 and len(unique_colors) > 1:
             match_mode = "add-color"
-        elif len(unique_sizes) == 1 and len(unique_colors) > 1:
+        elif len(unique_colors) == 1 and len(unique_sizes) > 1:
             match_mode = "add-code"
         progress(f"源匹配模式: {match_mode} (colors={len(unique_colors)}, sizes={len(unique_sizes)})")
 
         def suffix_candidates(suffix: str) -> List[str]:
+            suffix = (suffix or "").upper()
             if suffix == "-USA":
                 return ["-USA", "-PH", ""]
             if suffix == "-PH":
@@ -1170,8 +1288,12 @@ class ExcelProcessor:
                 continue
             source_style = normalized_source_style_map.get(info.product_code, info.product_code)
 
-            source_ref = None
-            if match_mode == "add-color":
+            # 优先完整 SKU 匹配，再回退到 11 位基准匹配
+            source_ref = sku_to_source.get(sku)
+            if source_ref is None and len(sku) >= 11:
+                source_ref = sku_base_to_source.get(sku[:11])
+
+            if source_ref is None and match_mode == "add-color":
                 # 加色：前7位 + 后2位(size)，并兼容 -USA/-PH
                 for sfx in suffix_candidates(info.suffix):
                     source_ref = style_size_suffix_to_source.get((source_style, info.size, sfx))
@@ -1179,7 +1301,7 @@ class ExcelProcessor:
                         break
                 if source_ref is None:
                     source_ref = style_size_to_source.get((source_style, info.size))
-            elif match_mode == "add-code":
+            elif source_ref is None and match_mode == "add-code":
                 # 加码：前9位(style+color)，并兼容 -USA/-PH
                 for sfx in suffix_candidates(info.suffix):
                     source_ref = style_color_suffix_to_source.get((source_style, info.color_code, sfx))
@@ -1193,11 +1315,6 @@ class ExcelProcessor:
                 source_ref = style_suffix_to_source.get((source_style, info.suffix))
             if source_ref is None:
                 source_ref = style_to_source.get(source_style)
-            # 兼容旧路径：完整 SKU / 11 位基准匹配
-            if source_ref is None:
-                source_ref = sku_to_source.get(sku)
-            if source_ref is None and len(sku) >= 11:
-                source_ref = sku_base_to_source.get(sku[:11])
             if source_ref is None:
                 continue
             source_sku = source_ref
@@ -1248,17 +1365,14 @@ class ExcelProcessor:
 
                     # 替换/颜色尺码变更：从输入表字段取值
                     if ("替换" in logic or "颜色/尺码变更" in logic) and in_field and in_field not in ("非映射", "-"):
-                        in_key = self._normalize_header(in_field)
-                        in_cols = source_header_map.get(in_key, [])
-                        if in_cols:
-                            in_idx = in_field_used[in_key]
-                            if in_idx >= len(in_cols):
-                                in_idx = len(in_cols) - 1
-                            in_col = in_cols[in_idx]
-                            in_field_used[in_key] += 1
-                            value = source_row_values[in_col - 1] if 0 < in_col <= len(source_row_values) else None
-                            if value is not None and str(value).strip() != "":
-                                output_ws.cell(row=output_row_idx, column=out_col).value = value
+                        value = read_source_value(
+                            source_header_map,
+                            source_row_values,
+                            [in_field],
+                            in_field_used,
+                        )
+                        if value is not None:
+                            output_ws.cell(row=output_row_idx, column=out_col).value = value
                         continue
 
                     # 固定值/默认值
@@ -1315,7 +1429,7 @@ class ExcelProcessor:
             # 产品名中的 US 尺码与目标 SKU 对齐
             name_cell = output_ws.cell(row=output_row_idx, column=5)
             if name_cell.value:
-                name_cell.value = re.sub(r'US\d{2}', f'US{info.size}', str(name_cell.value))
+                name_cell.value = replace_us_size_token(str(name_cell.value), info.size)
 
             # 覆盖 Your Price（普通模式优先价格报告；跟卖模式使用老版本价格-0.1）
             your_price_cols = output_header_map.get("your price", [])
@@ -1363,9 +1477,20 @@ class ExcelProcessor:
                     for col in quantity_price_3_cols:
                         output_ws.cell(row=output_row_idx, column=col).value = quantity_price_3
 
-            # Launch Date
+            # 所有价格相关字段统一格式
+            for header_key, cols in output_header_map.items():
+                if "price" not in header_key:
+                    continue
+                for col in cols:
+                    output_ws.cell(row=output_row_idx, column=col).number_format = "0.00"
+
+            # Launch Date: 优先按表头名定位，避免模板列位变化导致写错列
             launch_date = self.calculate_launch_date()
-            output_ws.cell(row=output_row_idx, column=532).value = launch_date
+            launch_date_cols = output_header_map.get("launch date", []) + output_header_map.get("product_site_launch_date", [])
+            if not launch_date_cols:
+                launch_date_cols = [532]
+            for col in dict.fromkeys(launch_date_cols):
+                output_ws.cell(row=output_row_idx, column=col).value = launch_date
 
             # 统一计算最终颜色/尺码（支持同时加色+加码）
             final_color_code = target_color if target_color else info.color_code
@@ -1373,6 +1498,7 @@ class ExcelProcessor:
             final_suffix = info.suffix if info.suffix else (source_info.suffix if source_info else "")
             if not final_suffix:
                 final_suffix = "-USA"
+            final_suffix = final_suffix.upper()
             final_sku = f"{info.product_code}{final_color_code}{final_size}{final_suffix}"
             parent_sku = f"{info.product_code}{final_suffix}"
 
@@ -1382,8 +1508,8 @@ class ExcelProcessor:
             color_changed = final_color_code != source_color_code
             info_for_image = source_info if source_info else info
             if color_changed and not clear_image_urls:
-                suffix = info_for_image.suffix
-                is_ph_suffix = (suffix == "-PH")
+                # 图片规则按“目标 Seller SKU 后缀”判定，不能用源行后缀。
+                is_ph_suffix = (final_suffix == "-PH")
                 image_variant = TEMPLATES[template_type]["image_variant"]
 
                 if is_ph_suffix:
@@ -1424,24 +1550,23 @@ class ExcelProcessor:
 
             # Generic Keyword
             generic_keyword_cell = output_ws.cell(row=output_row_idx, column=95)
+            source_generic_keyword = read_source_value(
+                source_header_map,
+                source_row_values,
+                ["generic keyword"],
+            )
+            if source_generic_keyword is not None:
+                generic_keyword_cell.value = source_generic_keyword
+
             if generic_keyword_cell.value:
                 generic_keyword = str(generic_keyword_cell.value)
                 if color_changed:
-                    original_color_name = color_mapper.get_color_name(info.color_code)
-                    final_color_name = color_mapper.get_color_name(final_color_code)
-                    target_color_name_lower = final_color_name.lower() if final_color_name else ""
-                    if original_color_name:
-                        original_color_lower = original_color_name.lower()
-                        generic_keyword = generic_keyword.replace(original_color_lower, target_color_name_lower)
-                        color_variants = [
-                            f"mint {original_color_lower}",
-                            f"light {original_color_lower}",
-                            f"dark {original_color_lower}",
-                            f"bright {original_color_lower}",
-                        ]
-                        for variant in color_variants:
-                            if variant in generic_keyword:
-                                generic_keyword = generic_keyword.replace(variant, target_color_name_lower)
+                    generic_keyword = replace_color_whole_words(
+                        generic_keyword,
+                        source_color_code,
+                        final_color_code,
+                        lower_target=True,
+                    )
                 output_ws.cell(row=output_row_idx, column=95).value = generic_keyword
 
             # 最终 SKU（防止颜色/尺码分步覆盖）
@@ -1452,18 +1577,23 @@ class ExcelProcessor:
             for col in parent_sku_cols:
                 output_ws.cell(row=output_row_idx, column=col).value = parent_sku
 
+            # Variation Theme 规范化
+            variation_theme_cols = output_header_map.get("variation theme", [])
+            for col in variation_theme_cols:
+                cell = output_ws.cell(row=output_row_idx, column=col)
+                cell.value = normalize_variation_theme(cell.value, info.product_code, source_style, final_suffix)
+
             # 产品名：颜色与尺码同步到最终值
             name_cell = output_ws.cell(row=output_row_idx, column=5)
             if name_cell.value:
                 product_name = str(name_cell.value)
                 if color_changed:
-                    original_color_name = color_mapper.get_color_name(info.color_code)
-                    final_color_name = color_mapper.get_color_name(final_color_code)
-                    if original_color_name and final_color_name:
-                        color_base = original_color_name.split()[-1]
-                        color_pattern = r'\b(?:Dark|Light|Mint|Bright|Deep|Pale|Dreen)?\s*' + re.escape(color_base) + r'\b'
-                        product_name = re.sub(color_pattern, final_color_name, product_name, flags=re.IGNORECASE)
-                product_name = re.sub(r'US\d{2}', f'US{final_size}', product_name)
+                    product_name = replace_color_whole_words(
+                        product_name,
+                        source_color_code,
+                        final_color_code,
+                    )
+                product_name = replace_us_size_token(product_name, final_size)
                 name_cell.value = product_name
 
             # 颜色展示列
@@ -1472,7 +1602,7 @@ class ExcelProcessor:
                 output_ws.cell(row=output_row_idx, column=136).value = final_color_name
 
             # 尺码列放在本行最后强制同步，避免被中间映射覆盖
-            size_without_leading_zero = str(int(final_size))
+            size_without_leading_zero = normalize_size_display(final_size)
             output_ws.cell(row=output_row_idx, column=30).value = size_without_leading_zero
             output_ws.cell(row=output_row_idx, column=299).value = size_without_leading_zero
             output_ws.cell(row=output_row_idx, column=153).value = size_without_leading_zero

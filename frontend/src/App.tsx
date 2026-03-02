@@ -9,6 +9,8 @@ import { ProcessButton } from './components/ExcelProcess/ProcessButton';
 import { DownloadLink } from './components/ExcelProcess/DownloadLink';
 import { AddMappingModal } from './components/ColorMapping/AddMappingModal';
 import { FollowSellUpload } from './components/FollowSell/FollowSellUpload';
+import { ExportHistory } from './components/ExportHistory';
+import { useProcessStore } from './store/useProcessStore';
 import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import fallbackColorMappings from './data/colorMapping';
@@ -135,7 +137,7 @@ function ExcelProcessPanel() {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'excel' | 'mapping' | 'followsell'>('excel');
+  const [activeTab, setActiveTab] = useState<'excel' | 'mapping' | 'followsell' | 'history'>('excel');
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -220,6 +222,16 @@ function App() {
               >
                 跟卖上新
               </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === 'history'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                历史记录
+              </button>
             </nav>
           </div>
         </div>
@@ -252,6 +264,18 @@ function App() {
 
           {activeTab === 'followsell' && (
             <FollowSellUpload />
+          )}
+
+          {activeTab === 'history' && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
+              <div className="border-b border-slate-200 px-6 py-4">
+                <h2 className="text-xl font-semibold text-primary-900">导出历史记录</h2>
+                <p className="text-xs text-slate-500 mt-1">查看所有模块的导出历史（跟卖、加色、加码）</p>
+              </div>
+              <div className="p-6">
+                <ExportHistory title="" defaultModule="all" />
+              </div>
+            </div>
           )}
         </main>
       </div>

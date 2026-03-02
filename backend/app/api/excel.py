@@ -2,18 +2,20 @@
 Excel 处理 API 路由
 """
 import os
+import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.config import UPLOADS_DIR, TEMPLATES
 from app.core.excel_processor import excel_processor
+from app.core.export_history import export_history
 from app.core.follow_sell_processor import follow_sell_processor
 from app.models.excel import (
     AnalysisResult,
@@ -29,6 +31,7 @@ from app.models.excel import (
     SKCProcessResponse,
     SKCBatchProcessRequest,
     SKCBatchProcessResponse,
+    ExportHistoryResponse,
 )
 
 router = APIRouter(prefix="/api", tags=["Excel 处理"])
@@ -71,6 +74,13 @@ def _run_process_job(job_id: str, request: ProcessRequest) -> None:
             target_size=request.target_size,
             progress_callback=progress_update,
         )
+        _record_export_history(
+            module=_normalize_export_module(request.mode),
+            template_type=request.template_type,
+            input_data=_build_add_mode_input_data(request),
+            filename=output_filename,
+            processed_count=processed_count,
+        )
         with _jobs_lock:
             finished_at = datetime.now().timestamp()
             _process_jobs[job_id].update({
@@ -104,6 +114,72 @@ def _resolve_follow_sell_source_files() -> List[str]:
     if txt_files:
         source_files.append(txt_files[0])
     return source_files
+
+
+def _build_follow_sell_filename(skc_tag: str) -> str:
+    normalized_skc = re.sub(r"[^A-Z0-9]", "", str(skc_tag or "").strip().upper()) or "UNKNOWN"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"followsell_{normalized_skc}_{timestamp}.xlsx"
+    output_path = UPLOADS_DIR / filename
+    suffix = 1
+    while output_path.exists():
+        filename = f"followsell_{normalized_skc}_{timestamp}_{suffix}.xlsx"
+        output_path = UPLOADS_DIR / filename
+        suffix += 1
+    return filename
+
+
+def _rename_follow_sell_export(original_filename: str, skc_tag: str) -> tuple[str, int]:
+    source_path = UPLOADS_DIR / original_filename
+    if not source_path.exists():
+        raise FileNotFoundError(f"导出文件不存在: {original_filename}")
+
+    target_filename = _build_follow_sell_filename(skc_tag)
+    target_path = UPLOADS_DIR / target_filename
+    source_path.rename(target_path)
+    return target_filename, int(target_path.stat().st_size)
+
+
+def _normalize_export_module(mode: Optional[str]) -> str:
+    normalized = str(mode or "").strip().lower()
+    return "add-code" if normalized == "add-code" else "add-color"
+
+
+def _build_add_mode_input_data(request: ProcessRequest) -> Dict:
+    generated_skus = [str(sku).strip().upper() for sku in (request.generated_skus or []) if str(sku).strip()]
+    colors = sorted({sku[7:9] for sku in generated_skus if len(sku) >= 9})
+    sizes = sorted({sku[9:11] for sku in generated_skus if len(sku) >= 11})
+    return {
+        "prefixes": [str(p).strip().upper() for p in request.selected_prefixes if str(p).strip()],
+        "colors": colors,
+        "sizes": sizes,
+        "mode": _normalize_export_module(request.mode),
+    }
+
+
+def _record_export_history(
+    *,
+    module: str,
+    template_type: str,
+    input_data: Dict,
+    filename: str,
+    processed_count: int,
+) -> None:
+    try:
+        file_path = UPLOADS_DIR / filename
+        file_size = int(file_path.stat().st_size) if file_path.exists() else 0
+        export_history.add_record(
+            module=module,
+            template_type=template_type,
+            input_data=input_data,
+            filename=filename,
+            file_size=file_size,
+            processed_count=processed_count,
+            status="success",
+        )
+        export_history.cleanup(retention_days=90, max_records=1000)
+    except Exception as exc:
+        print(f"[export-history] 记录失败: {exc}")
 
 
 @router.get("/templates", response_model=List[TemplateInfo])
@@ -182,6 +258,13 @@ async def process_excel(request: ProcessRequest):
             generated_skus=request.generated_skus,
             target_color=request.target_color,
             target_size=request.target_size
+        )
+        _record_export_history(
+            module=_normalize_export_module(request.mode),
+            template_type=request.template_type,
+            input_data=_build_add_mode_input_data(request),
+            filename=output_filename,
+            processed_count=processed_count,
         )
 
         return ProcessResponse(
@@ -271,6 +354,78 @@ async def get_process_status(job_id: str):
         message=message,
         error=job.get("error"),
     )
+
+
+@router.get("/export-history", response_model=ExportHistoryResponse)
+async def get_export_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    module: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+):
+    """获取通用导出历史记录（分页/模块过滤/搜索）"""
+    records, total = export_history.list_records(
+        page=page,
+        page_size=page_size,
+        module=module,
+        search=search,
+    )
+    return ExportHistoryResponse(
+        success=True,
+        data=records,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/export-history/{history_id}/download")
+async def download_export_history_file(history_id: int):
+    """下载历史记录文件，若文件缺失则更新状态为 file_missing。"""
+    record = export_history.get_record(history_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="历史记录不存在")
+
+    filename = record["filename"]
+    file_path = UPLOADS_DIR / filename
+    if not file_path.exists():
+        export_history.update_status(history_id, "file_missing")
+        return JSONResponse(
+            content={"success": False, "message": "文件不存在，已标记为 file_missing"},
+            status_code=200,
+        )
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@router.delete("/export-history/{history_id}")
+async def delete_export_history(history_id: int):
+    """删除历史记录，并尝试删除对应文件。"""
+    record = export_history.delete_record(history_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="历史记录不存在")
+
+    deleted_file = False
+    filename = record.get("filename", "")
+    if filename:
+        file_path = UPLOADS_DIR / filename
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+                deleted_file = True
+            except OSError:
+                deleted_file = False
+
+    return {
+        "success": True,
+        "deleted": True,
+        "deleted_file": deleted_file,
+        "message": "历史记录已删除",
+    }
 
 
 @router.get("/download/{filename}")
@@ -364,6 +519,18 @@ async def process_skc(request: SKCProcessRequest):
             clear_image_urls=True,
             follow_sell_mode=True,
         )
+        history_filename, _file_size = _rename_follow_sell_export(output_filename, query_result["skc"])
+        _record_export_history(
+            module="follow-sell",
+            template_type=request.template_type,
+            input_data={
+                "skc": query_result["skc"],
+                "new_style": query_result["new_style"],
+                "old_style": query_result["old_style"],
+            },
+            filename=history_filename,
+            processed_count=len(generated_skus),
+        )
 
         return SKCProcessResponse(
             success=True,
@@ -371,7 +538,7 @@ async def process_skc(request: SKCProcessRequest):
             new_style=query_result["new_style"],
             old_style=query_result["old_style"],
             total_skus=len(generated_skus),
-            output_filename=output_filename,
+            output_filename=history_filename,
             message=f"导出成功，共生成 {len(generated_skus)} 个 SKU",
         )
     except HTTPException:
@@ -439,6 +606,29 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
             clear_image_urls=True,
             follow_sell_mode=True,
         )
+        batch_skc = ",".join(normalized_skcs)
+        history_filename, _file_size = _rename_follow_sell_export(output_filename, "batch")
+        new_styles = sorted({
+            str(item.get("new_style", "")).strip().upper()
+            for item in success_results
+            if item.get("new_style")
+        })
+        old_styles = sorted({
+            str(item.get("old_style", "")).strip().upper()
+            for item in success_results
+            if item.get("old_style")
+        })
+        _record_export_history(
+            module="follow-sell",
+            template_type=request.template_type,
+            input_data={
+                "skc": batch_skc,
+                "new_style": ",".join(new_styles),
+                "old_style": ",".join(old_styles),
+            },
+            filename=history_filename,
+            processed_count=len(generated_skus),
+        )
 
         return SKCBatchProcessResponse(
             success=True,
@@ -446,7 +636,7 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
             success_skcs=len(success_results),
             failed_skcs=failed_count,
             total_skus=len(generated_skus),
-            output_filename=output_filename,
+            output_filename=history_filename,
             message=f"批量导出成功：SKC 成功 {len(success_results)}，失败 {failed_count}，SKU 共 {len(generated_skus)}",
         )
     except HTTPException:

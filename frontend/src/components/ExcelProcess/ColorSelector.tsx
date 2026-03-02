@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { mappingApi } from '../../services/mappingApi';
 import { useProcessStore } from '../../store/useProcessStore';
 import fallbackColorMappings from '../../data/colorMapping';
+import { useState } from 'react';
 
 export function ColorSelector() {
   const {
@@ -17,6 +18,8 @@ export function ColorSelector() {
     setColorList,
     generateSKUs,
   } = useProcessStore();
+
+  const [colorSearchInput, setColorSearchInput] = useState('');
 
   const { data: mappings } = useQuery({
     queryKey: ['mappings'],
@@ -207,13 +210,73 @@ export function ColorSelector() {
             <label className="text-sm font-medium text-gray-700">
               颜色列表 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              value={colorList}
-              onChange={(e) => setColorList(e.target.value.toUpperCase())}
-              placeholder="输入多个颜色代码，用逗号分隔（例如: LV,BK,WH）"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={colorList}
+                onChange={(e) => setColorList(e.target.value.toUpperCase())}
+                placeholder="手动输入多个颜色代码（例如: LV,BK,WH）"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={colorSearchInput}
+                  onChange={(e) => setColorSearchInput(e.target.value.toUpperCase())}
+                  placeholder="搜索颜色代码（例如: B）"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {colorSearchInput && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    {colorCodes
+                      .filter(
+                        (code) =>
+                          code.includes(colorSearchInput) ||
+                          mappings?.[code]
+                            ?.toLowerCase()
+                            .includes(colorSearchInput.toLowerCase())
+                      )
+                      .map((code) => (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => {
+                            const currentColors = colorList
+                              .split(/[,，、;；\s]+/)
+                              .map((c) => c.trim().toUpperCase())
+                              .filter((c) => c.length === 2);
+                            if (!currentColors.includes(code)) {
+                              setColorList(
+                                currentColors.length > 0
+                                  ? `${colorList},${code}`
+                                  : code
+                              );
+                            }
+                            setColorSearchInput('');
+                          }}
+                          className="w-full px-3 py-2 text-left hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
+                        >
+                          <span className="font-medium">{code}</span>
+                          <span className="text-gray-600 ml-2">
+                            - {mappings?.[code]}
+                          </span>
+                        </button>
+                      ))}
+                    {colorCodes.filter(
+                      (code) =>
+                        code.includes(colorSearchInput) ||
+                        mappings?.[code]
+                          ?.toLowerCase()
+                          .includes(colorSearchInput.toLowerCase())
+                    ).length === 0 && (
+                      <div className="px-3 py-2 text-gray-500 text-sm">
+                        没有找到匹配的颜色
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
             <p className="text-xs text-gray-500">
               支持逗号、中文逗号或空格分隔
             </p>

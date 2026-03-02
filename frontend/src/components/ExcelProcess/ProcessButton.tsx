@@ -142,6 +142,7 @@ export function ProcessButton() {
       template_type: templateType,
       filenames: dataFiles, // 只使用数据文件
       selected_prefixes: selectedPrefixes,
+      mode,
       generated_skus: generatedSkus,
       target_color: targetColor,
       target_size: targetSize,

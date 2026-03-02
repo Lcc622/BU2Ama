@@ -9,6 +9,7 @@ import logging
 from app.config import CORS_ORIGINS
 from app.api import mapping, excel, followsell
 from app.core.excel_processor import excel_processor
+from app.core.export_history import export_history
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def prewarm_caches():
+    export_history.init_db()
     template_warmup = excel_processor.prewarm_template_cache()
     logger.info(f"Template cache prewarm: {template_warmup}")
 

@@ -4,6 +4,7 @@
 """
 import sqlite3
 import openpyxl
+import re
 from typing import Dict, List, Optional, Tuple, Any
 from app.config import UPLOADS_DIR
 
@@ -15,6 +16,7 @@ class FollowSellProcessor:
         self.new_to_old_mapping: Dict[str, str] = {}
         self.ep_data_cache: Dict[str, List[Dict]] = {}  # old_style -> [sku_data]
         self.ep_loaded = False
+        self._last_parse_error = ""
         self.index_db_path = UPLOADS_DIR / "ep_index.db"
         self._load_mapping()
         # 不在初始化时加载 EP 数据，改为懒加载
@@ -63,6 +65,9 @@ class FollowSellProcessor:
     def _ensure_ep_index(self) -> None:
         """确保 EP 索引可用，文件变化时自动重建"""
         ep_files = ['EP-0.xlsm', 'EP-1.xlsm', 'EP-2.xlsm']
+        sku_pattern = re.compile(
+            r"^(?P<style>[A-Z0-9]{7})(?P<color>[A-Z]{2})(?P<size>\d{2})(?P<suffix>-?[A-Z0-9]+)?$"
+        )
         signature = self._build_files_signature(ep_files)
         if not signature:
             return
@@ -82,6 +87,7 @@ class FollowSellProcessor:
                 INSERT OR REPLACE INTO ep_sku_index(style, sku, size, suffix, source_file)
                 VALUES (?, ?, ?, ?, ?)
             """
+            total_filtered = 0
 
             for ep_file in ep_files:
                 file_path = UPLOADS_DIR / ep_file
@@ -92,19 +98,20 @@ class FollowSellProcessor:
                     wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
                     ws = wb['Template']
                     row_count = 0
+                    filtered_count = 0
                     batch: List[Tuple[str, str, str, str, str]] = []
                     for row in ws.iter_rows(min_row=7, min_col=3, max_col=3, values_only=True):
                         sku_cell = row[0] if row else None
                         if not sku_cell:
                             continue
                         sku = str(sku_cell).strip().upper()
-                        if len(sku) < 11:
+                        matched = sku_pattern.fullmatch(sku)
+                        if not matched:
+                            filtered_count += 1
                             continue
-                        style = sku[:7]
-                        size = sku[9:11]
-                        suffix = sku[11:] if len(sku) > 11 else ""
-                        if not size.isdigit():
-                            continue
+                        style = matched.group("style")
+                        size = matched.group("size")
+                        suffix = matched.group("suffix") or ""
                         batch.append((style, sku, size, suffix, ep_file))
                         row_count += 1
                         if len(batch) >= 5000:
@@ -115,9 +122,11 @@ class FollowSellProcessor:
                         conn.executemany(insert_sql, batch)
                         conn.commit()
                     wb.close()
-                    print(f"  {ep_file} 索引完成，共 {row_count} 行")
+                    total_filtered += filtered_count
+                    print(f"  {ep_file} 索引完成，共 {row_count} 行，过滤无效 SKU {filtered_count} 行")
                 except Exception as e:
                     print(f"加载 {ep_file} 失败: {e}")
+            print(f"EP 索引重建完成，累计过滤无效 SKU {total_filtered} 行")
 
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('ep_signature', ?)",
@@ -165,32 +174,34 @@ class FollowSellProcessor:
         Returns:
             (style, color_code) 或 None
         """
-        skc = skc.strip().upper()
-
-        # SKC 长度必须是 9 位
-        if len(skc) != 9:
+        skc = str(skc or "").strip().upper()
+        self._last_parse_error = ""
+        if not re.fullmatch(r"^[A-Z0-9]{7}[A-Z]{2}$", skc):
+            self._last_parse_error = (
+                f"SKC 格式错误: {skc or '<empty>'}，应匹配 ^[A-Z0-9]{{7}}[A-Z]{{2}}$（7位款号+2位大写字母颜色）"
+            )
             return None
 
         style = skc[:7]  # 前7位
         color_code = skc[7:9]  # 后2位
 
-        # 验证颜色代码格式（2个大写字母）
-        if not color_code.isalpha() or not color_code.isupper():
-            return None
-
         return style, color_code
 
     def _normalize_suffix(self, suffix: str) -> str:
-        """统一 SKU 后缀规则，和加色加码保持一致。"""
+        """按 SOP 统一 SKU 后缀。"""
         normalized = str(suffix or "").strip().upper()
         if not normalized:
             return "-USA"
         if not normalized.startswith("-"):
             normalized = f"-{normalized}"
-
-        if normalized in {"-USB", "-USC", "-USA"}:
+        if normalized == "-":
             return "-USA"
-        if normalized == "-PHC":
+
+        if normalized in {"-A", "-B", "-C", "-D"}:
+            return "-USA"
+        if normalized in {"-US", "-USB", "-USC", "-USD", "-USA"}:
+            return "-USA"
+        if normalized in {"-PH", "-PHB", "-PHC"}:
             return "-PH"
         return normalized
 
@@ -229,7 +240,7 @@ class FollowSellProcessor:
         # 1. 解析 SKC
         parsed = self.parse_skc(skc)
         if not parsed:
-            result['message'] = f"SKC 格式错误，应为9位（7位款号+2位颜色），如 ES0128BDG"
+            result['message'] = self._last_parse_error or "SKC 格式错误"
             return result
 
         new_style, color_code = parsed
