@@ -57,7 +57,7 @@ export function ColorSelector() {
               className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
             />
             <span className="ml-2 text-sm text-gray-700">
-              加色（一码多色）
+              加色（一色多码）
             </span>
           </label>
           <label className="flex items-center cursor-pointer">
@@ -70,17 +70,17 @@ export function ColorSelector() {
               className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
             />
             <span className="ml-2 text-sm text-gray-700">
-              加码（一色多码）
+              加码（一码多色）
             </span>
           </label>
         </div>
       </div>
 
-      {/* 加码模式 */}
-      {mode === 'add-code' && (
+      {/* 加色模式（一色多码） */}
+      {mode === 'add-color' && (
         <div className="space-y-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
           <p className="text-sm text-gray-700 font-medium">
-            加码模式：选择一个颜色，生成多个尺码的 SKU
+            加色模式：可输入多个尺码或多个颜色（仅允许一侧多选）
           </p>
 
           {/* 颜色选择 */}
@@ -93,16 +93,25 @@ export function ColorSelector() {
                 type="text"
                 value={colorList}
                 onChange={(e) => setColorList(e.target.value.toUpperCase())}
-                placeholder="手动输入颜色代码（例如: LV）"
-                maxLength={2}
+                placeholder="手动输入颜色代码（例如: LV,BK）"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <select
-                value={colorCodes.includes(colorList) ? colorList : ''}
-                onChange={(e) => setColorList(e.target.value)}
+                value=""
+                onChange={(e) => {
+                  const selected = e.target.value;
+                  if (!selected) return;
+                  const currentColors = colorList
+                    .split(/[,，、;；\s]+/)
+                    .map((c) => c.trim().toUpperCase())
+                    .filter((c) => c.length === 2);
+                  if (!currentColors.includes(selected)) {
+                    setColorList(currentColors.length ? `${currentColors.join(',')},${selected}` : selected);
+                  }
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">从下拉选择颜色代码</option>
+                <option value="">从下拉选择颜色代码（可多选）</option>
                 {colorCodes.map((code) => (
                   <option key={code} value={code}>
                     {code} - {mappings?.[code]}
@@ -177,11 +186,11 @@ export function ColorSelector() {
         </div>
       )}
 
-      {/* 加色模式 */}
-      {mode === 'add-color' && (
+      {/* 加码模式（一码多色） */}
+      {mode === 'add-code' && (
         <div className="space-y-4 p-4 bg-green-50 border border-green-200 rounded-md">
           <p className="text-sm text-gray-700 font-medium">
-            加色模式：选择一个尺码，生成多个颜色的 SKU
+            加码模式：可输入多个颜色或多个尺码（仅允许一侧多选）
           </p>
 
           {/* 尺码选择 */}
@@ -194,8 +203,7 @@ export function ColorSelector() {
               list="size-list-single"
               value={startSize}
               onChange={(e) => setStartSize(e.target.value)}
-              placeholder="输入或选择尺码（例如: 14）"
-              maxLength={2}
+              placeholder="输入一个或多个尺码（例如: 14,16,18）"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <datalist id="size-list-single">

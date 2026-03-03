@@ -10,7 +10,6 @@ import { DownloadLink } from './components/ExcelProcess/DownloadLink';
 import { AddMappingModal } from './components/ColorMapping/AddMappingModal';
 import { FollowSellUpload } from './components/FollowSell/FollowSellUpload';
 import { ExportHistory } from './components/ExportHistory';
-import { useProcessStore } from './store/useProcessStore';
 import { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import fallbackColorMappings from './data/colorMapping';

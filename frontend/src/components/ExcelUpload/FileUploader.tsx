@@ -8,6 +8,15 @@ import { useUploadStore } from '../../store/useUploadStore';
 import type { AnalysisResult } from '../../types/api';
 import toast from 'react-hot-toast';
 
+const ALLOWED_FIXED_FILES = new Set(['EP-0.xlsm', 'EP-1.xlsm', 'EP-2.xlsm']);
+
+const isAllowedUploadFilename = (filename: string): boolean => {
+  const trimmed = String(filename || '').trim();
+  if (!trimmed) return false;
+  if (ALLOWED_FIXED_FILES.has(trimmed)) return true;
+  return /^EP-All\+Listings\+Report\.txt$/i.test(trimmed);
+};
+
 export function FileUploader() {
   const [isDragging, setIsDragging] = useState(false);
   const uploadedFiles = useUploadStore((state) => state.uploadedFiles);
@@ -20,18 +29,9 @@ export function FileUploader() {
       try {
         const files = await excelApi.listFiles();
 
-        // 固定的数据文件列表
-        const targetFiles = [
-          'EP-0.xlsm',
-          'EP-1.xlsm',
-          'EP-2.xlsm',
-        ];
-
         // 过滤出存在的目标文件
         const existingFiles = files.filter((file) => {
-          if (targetFiles.includes(file.filename)) return true;
-          const lower = file.filename.toLowerCase();
-          return lower.startsWith('all+listings+report') && lower.endsWith('.txt');
+          return isAllowedUploadFilename(file.filename);
         });
 
         if (existingFiles.length > 0) {
@@ -86,19 +86,13 @@ export function FileUploader() {
 
     const files = Array.from(e.dataTransfer.files);
     const allowedFiles = files.filter((file) => {
-      const lower = file.name.toLowerCase();
-      return (
-        lower.endsWith('.xlsx') ||
-        lower.endsWith('.xlsm') ||
-        lower.endsWith('.xls') ||
-        lower.endsWith('.txt')
-      );
+      return isAllowedUploadFilename(file.name);
     });
 
     if (allowedFiles.length > 0) {
       uploadMutation.mutate(allowedFiles);
     } else {
-      toast.error('请上传数据文件（.xlsx, .xlsm, .xls, .txt）');
+      toast.error('仅支持上传 EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt');
     }
   }, [uploadMutation]);
 
@@ -106,19 +100,11 @@ export function FileUploader() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (files && files.length > 0) {
-        const selectedFiles = Array.from(files).filter((file) => {
-          const lower = file.name.toLowerCase();
-          return (
-            lower.endsWith('.xlsx') ||
-            lower.endsWith('.xlsm') ||
-            lower.endsWith('.xls') ||
-            lower.endsWith('.txt')
-          );
-        });
+        const selectedFiles = Array.from(files).filter((file) => isAllowedUploadFilename(file.name));
         if (selectedFiles.length > 0) {
           uploadMutation.mutate(selectedFiles);
         } else {
-          toast.error('请上传数据文件（.xlsx, .xlsm, .xls, .txt）');
+          toast.error('仅支持上传 EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt');
         }
       }
       // 清空 input 以允许重复上传同一文件
@@ -142,7 +128,7 @@ export function FileUploader() {
         <input
           type="file"
           id="file-upload"
-          accept=".xlsx,.xlsm,.xls,.txt"
+          accept=".xlsm,.txt"
           onChange={handleFileSelect}
           className="hidden"
           disabled={uploadMutation.isPending}
@@ -189,15 +175,20 @@ export function FileUploader() {
           </div>
 
           <div className="text-xs text-slate-500">
-            支持 .xlsx, .xlsm, .xls, .txt | 可多次上传（可更新 EP-0/1/2 和 All+Listings+Report）
+            仅支持固定文件名：EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt
           </div>
         </label>
       </div>
 
-      {/* 已上传文件：仅展示计数 */}
+      {/* 已上传文件：展示计数和文件名 */}
       {uploadedFiles.length > 0 && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-          已加载 {uploadedFiles.length} 个数据文件
+          <p className="font-medium">已加载 {uploadedFiles.length} 个数据文件</p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-slate-600">
+            {uploadedFiles.map((filename) => (
+              <li key={filename}>{filename}</li>
+            ))}
+          </ul>
         </div>
       )}
 

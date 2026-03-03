@@ -99,45 +99,42 @@ export const useProcessStore = create<ProcessStore>((set, get) => ({
 
     if (!productPrefix) return [];
 
+    const colors = colorList
+      .split(/[,，、;；\s]+/)
+      .map((c) => c.trim().toUpperCase())
+      .filter((c) => c.length === 2);
+    if (colors.length === 0) return [];
+
+    const parsedSizeList = startSize
+      .split(/[,，、;；\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !Number.isNaN(n));
+
+    let sizes: number[] = [];
     if (mode === 'add-color') {
-      // 加色模式：多个颜色 × 一个尺码
-      const colors = colorList
-        .split(/[,，、;；\s]+/)
-        .map((c) => c.trim().toUpperCase())
-        .filter((c) => c.length === 2);
-
-      if (colors.length === 0) return [];
-
-      const size = parseInt(startSize, 10);
-      if (isNaN(size)) return [];
-
-      const sizeStr = size.toString().padStart(2, '0');
-
-      return colors.map((color) => `${productPrefix}${color}${sizeStr}`);
-    } else {
-      // 加码模式：一个颜色 × 多个尺码
-      const colors = colorList
-        .split(/[,，、;；\s]+/)
-        .map((c) => c.trim().toUpperCase())
-        .filter((c) => c.length === 2);
-
-      if (colors.length === 0) return [];
-
       const start = parseInt(startSize, 10);
       const end = parseInt(endSize, 10);
-
-      if (isNaN(start) || isNaN(end) || start > end) return [];
-
-      const skus: string[] = [];
-      const color = colors[0]; // 只取第一个颜色
-
-      for (let size = start; size <= end; size += sizeStep) {
-        const sizeStr = size.toString().padStart(2, '0');
-        skus.push(`${productPrefix}${color}${sizeStr}`);
+      if (!isNaN(start) && !isNaN(end) && start <= end && sizeStep > 0) {
+        for (let size = start; size <= end; size += sizeStep) {
+          sizes.push(size);
+        }
+      } else {
+        sizes = parsedSizeList;
       }
-
-      return skus;
+    } else {
+      sizes = parsedSizeList;
     }
+    if (sizes.length === 0) return [];
+
+    const skus: string[] = [];
+    for (const color of colors) {
+      for (const size of sizes) {
+        skus.push(`${productPrefix}${color}${size.toString().padStart(2, '0')}`);
+      }
+    }
+    return skus;
   },
 
   reset: () =>

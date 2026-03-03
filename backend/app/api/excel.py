@@ -72,6 +72,7 @@ def _run_process_job(job_id: str, request: ProcessRequest) -> None:
             generated_skus=request.generated_skus,
             target_color=request.target_color,
             target_size=request.target_size,
+            processing_mode=request.mode,
             progress_callback=progress_update,
         )
         _record_export_history(
@@ -156,6 +157,25 @@ def _build_add_mode_input_data(request: ProcessRequest) -> Dict:
         "mode": _normalize_export_module(request.mode),
     }
 
+def _is_allowed_data_filename(filename: str) -> bool:
+    normalized = str(filename or "").strip()
+    if not normalized:
+        return False
+    if normalized in {"EP-0.xlsm", "EP-1.xlsm", "EP-2.xlsm"}:
+        return True
+    return normalized.lower() == "ep-all+listings+report.txt"
+
+
+def _validate_selection_constraints(generated_skus: Optional[List[str]]) -> None:
+    skus = [str(sku).strip().upper() for sku in (generated_skus or []) if str(sku).strip()]
+    if not skus:
+        raise HTTPException(status_code=400, detail="缺少目标 SKU，无法处理")
+
+    colors = {sku[7:9] for sku in skus if len(sku) >= 9}
+    sizes = {sku[9:11] for sku in skus if len(sku) >= 11}
+    if not colors or not sizes:
+        raise HTTPException(status_code=400, detail="目标 SKU 格式不正确，无法识别颜色或尺码")
+
 
 def _record_export_history(
     *,
@@ -199,6 +219,11 @@ async def get_templates():
 async def analyze_file(file: UploadFile = File(...)):
     """分析上传的 Excel 文件"""
     try:
+        if not _is_allowed_data_filename(file.filename):
+            raise HTTPException(
+                status_code=400,
+                detail="仅支持上传 EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt"
+            )
         # 保存上传的文件
         file_path = UPLOADS_DIR / file.filename
         with open(file_path, "wb") as f:
@@ -222,6 +247,8 @@ async def analyze_file(file: UploadFile = File(...)):
         result = excel_processor.analyze_excel_file(file.filename)
         return result
 
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -251,13 +278,15 @@ async def analyze_existing_file(filename: str):
 async def process_excel(request: ProcessRequest):
     """处理 Excel 文件并生成新文件"""
     try:
+        _validate_selection_constraints(request.generated_skus)
         output_filename, processed_count = excel_processor.process_excel(
             template_type=request.template_type,
             filenames=request.filenames,
             selected_prefixes=request.selected_prefixes,
             generated_skus=request.generated_skus,
             target_color=request.target_color,
-            target_size=request.target_size
+            target_size=request.target_size,
+            processing_mode=request.mode,
         )
         _record_export_history(
             module=_normalize_export_module(request.mode),
@@ -274,6 +303,8 @@ async def process_excel(request: ProcessRequest):
             processed_count=processed_count
         )
 
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -285,6 +316,8 @@ async def process_excel(request: ProcessRequest):
 @router.post("/process-async", response_model=ProcessAsyncStartResponse)
 async def process_excel_async(request: ProcessRequest):
     """异步处理 Excel 文件并返回任务 ID"""
+    _validate_selection_constraints(request.generated_skus)
+
     job_id = uuid.uuid4().hex
     with _jobs_lock:
         _process_jobs[job_id] = {

@@ -4,9 +4,10 @@
 """
 
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import openpyxl
 from openpyxl.workbook import Workbook
@@ -18,17 +19,16 @@ logger = logging.getLogger(__name__)
 class FollowSellProcessor:
     """跟卖上新处理器"""
 
-    # 字段列映射（基于示例文件分析）
-    FIELD_COLUMNS = {
+    # 字段列映射默认值（模板缺字段时回退）
+    FIELD_COLUMNS_DEFAULTS = {
         'seller_sku': 2,              # Seller SKU
-        'product_id': 6,              # Product ID (ASIN)
         'product_id_type': 7,         # Product ID Type
         'style_number': 10,           # Style Number
         'manufacturer_part_number': 13,  # Manufacturer Part Number
         'your_price': 16,             # Your Price
         'quantity': 17,               # Quantity
-        'release_date': 521,          # Release Date
-        'launch_date': 533,           # Launch Date
+        'release_date': 520,          # Release Date
+        'launch_date': 532,           # Launch Date
     }
 
     def __init__(self):
@@ -123,6 +123,31 @@ class FollowSellProcessor:
         logger.warning("未找到 list price 列")
         return None
 
+    def resolve_field_columns(self, header_row: tuple) -> Dict[str, int]:
+        """基于表头动态定位关键列，避免模板列位变化导致写错列。"""
+        header_map: Dict[str, List[int]] = defaultdict(list)
+        for idx, cell_value in enumerate(header_row, start=1):
+            if cell_value and isinstance(cell_value, str):
+                header_map[cell_value.strip().lower()].append(idx)
+
+        def pick(field_key: str, *header_names: str) -> int:
+            for header_name in header_names:
+                cols = header_map.get(header_name.lower(), [])
+                if cols:
+                    return cols[0]
+            return self.FIELD_COLUMNS_DEFAULTS[field_key]
+
+        return {
+            'seller_sku': pick('seller_sku', 'seller sku'),
+            'product_id_type': pick('product_id_type', 'product id type'),
+            'style_number': pick('style_number', 'style number'),
+            'manufacturer_part_number': pick('manufacturer_part_number', 'manufacturer part number'),
+            'your_price': pick('your_price', 'your price'),
+            'quantity': pick('quantity', 'quantity'),
+            'release_date': pick('release_date', 'release date'),
+            'launch_date': pick('launch_date', 'launch date', 'product_site_launch_date'),
+        }
+
     def process(self, old_file_path: str, new_product_code: str) -> Dict[str, Any]:
         """
         处理跟卖上新
@@ -164,13 +189,14 @@ class FollowSellProcessor:
 
         # 获取表头（第2行）
         header_row = tuple(cell.value for cell in sheet[2])
+        field_columns = self.resolve_field_columns(header_row)
 
         # 查找图片列和 list price 列
         image_columns = self.find_image_columns(header_row)
         list_price_column = self.find_list_price_column(header_row)
 
         # 从第一个数据行（第4行）提取老产品代码
-        first_sku = sheet.cell(4, self.FIELD_COLUMNS['seller_sku']).value
+        first_sku = sheet.cell(4, field_columns['seller_sku']).value
         if not first_sku:
             raise ValueError("无法从第一行数据中读取 SKU")
 
@@ -178,7 +204,7 @@ class FollowSellProcessor:
         logger.info(f"识别老产品代码: {old_product_code}")
 
         # 计算上新日期
-        launch_date = self.calculate_launch_date()
+        launch_date = self.calculate_launch_date().replace(tzinfo=None)
 
         # 统计处理的 SKU 数量
         total_skus = 0
@@ -186,7 +212,7 @@ class FollowSellProcessor:
         # 遍历所有数据行（从第4行开始）
         for row_idx in range(4, sheet.max_row + 1):
             # 读取 Seller SKU
-            old_sku = sheet.cell(row_idx, self.FIELD_COLUMNS['seller_sku']).value
+            old_sku = sheet.cell(row_idx, field_columns['seller_sku']).value
 
             # 如果 SKU 为空，跳过
             if not old_sku:
@@ -197,31 +223,31 @@ class FollowSellProcessor:
 
             # 更新字段
             # 1. Seller SKU
-            sheet.cell(row_idx, self.FIELD_COLUMNS['seller_sku']).value = new_sku
+            sheet.cell(row_idx, field_columns['seller_sku']).value = new_sku
 
             # 2. Product ID (ASIN) - 保持不变
             # 不需要修改
 
             # 3. Product ID Type - 固定为 ASIN
-            sheet.cell(row_idx, self.FIELD_COLUMNS['product_id_type']).value = "ASIN"
+            sheet.cell(row_idx, field_columns['product_id_type']).value = "ASIN"
 
             # 4. Style Number
-            old_style = sheet.cell(row_idx, self.FIELD_COLUMNS['style_number']).value
+            old_style = sheet.cell(row_idx, field_columns['style_number']).value
             if old_style:
                 new_style = old_style.replace(old_product_code, new_product_code)
-                sheet.cell(row_idx, self.FIELD_COLUMNS['style_number']).value = new_style
+                sheet.cell(row_idx, field_columns['style_number']).value = new_style
 
             # 5. Manufacturer Part Number
-            old_part = sheet.cell(row_idx, self.FIELD_COLUMNS['manufacturer_part_number']).value
+            old_part = sheet.cell(row_idx, field_columns['manufacturer_part_number']).value
             if old_part:
                 new_part = old_part.replace(old_product_code, new_product_code)
-                sheet.cell(row_idx, self.FIELD_COLUMNS['manufacturer_part_number']).value = new_part
+                sheet.cell(row_idx, field_columns['manufacturer_part_number']).value = new_part
 
             # 6. Your Price - 减 0.1
-            old_price = sheet.cell(row_idx, self.FIELD_COLUMNS['your_price']).value
+            old_price = sheet.cell(row_idx, field_columns['your_price']).value
             if old_price and isinstance(old_price, (int, float)):
                 new_price = round(old_price - 0.1, 2)
-                sheet.cell(row_idx, self.FIELD_COLUMNS['your_price']).value = new_price
+                sheet.cell(row_idx, field_columns['your_price']).value = new_price
 
                 # 7. List Price - new_price + 10
                 if list_price_column:
@@ -229,17 +255,21 @@ class FollowSellProcessor:
                     sheet.cell(row_idx, list_price_column).value = list_price
 
             # 8. Quantity - 固定为 0
-            sheet.cell(row_idx, self.FIELD_COLUMNS['quantity']).value = 0
+            sheet.cell(row_idx, field_columns['quantity']).value = 0
 
             # 9. Image - 清空所有图片列
             for img_col in image_columns:
                 sheet.cell(row_idx, img_col).value = None
 
             # 10. Release Date
-            sheet.cell(row_idx, self.FIELD_COLUMNS['release_date']).value = launch_date
+            release_cell = sheet.cell(row_idx, field_columns['release_date'])
+            release_cell.value = launch_date
+            release_cell.number_format = "yyyy/m/d"
 
             # 11. Launch Date
-            sheet.cell(row_idx, self.FIELD_COLUMNS['launch_date']).value = launch_date
+            launch_cell = sheet.cell(row_idx, field_columns['launch_date'])
+            launch_cell.value = launch_date
+            launch_cell.number_format = "yyyy/m/d"
 
             total_skus += 1
 

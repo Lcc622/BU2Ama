@@ -256,7 +256,7 @@ class FollowSellProcessor:
 
         result['old_style'] = old_style
 
-        # 3. 在 EP SQLite 索引中查找老款号的所有尺码
+        # 3. 在 EP SQLite 索引中查找老款号“同颜色”的所有尺码
         conn = self._connect_db()
         try:
             rows = conn.execute(
@@ -264,15 +264,16 @@ class FollowSellProcessor:
                 SELECT DISTINCT size, suffix
                 FROM ep_sku_index
                 WHERE style = ?
+                  AND substr(sku, 8, 2) = ?
                 ORDER BY size, suffix
                 """,
-                (old_style,)
+                (old_style, color_code)
             ).fetchall()
         finally:
             conn.close()
 
         if not rows:
-            result['message'] = f"在 EP-0/1/2 聚合表中未找到老款号 {old_style} 的数据"
+            result['message'] = f"在 EP-0/1/2 聚合表中未找到老款号 {old_style} 颜色 {color_code} 的数据"
             return result
 
         # 5. 构建结果

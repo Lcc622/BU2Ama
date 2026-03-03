@@ -28,28 +28,58 @@ const buildGeneratedSkus = (
 
   if (colors.length === 0) return [];
 
+  const parsedSizeList = startSize
+    .split(/[,，、;；\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => parseInt(s, 10))
+    .filter((n) => !Number.isNaN(n));
+
+  let sizes: number[] = [];
   if (mode === 'add-color') {
-    const size = parseInt(startSize, 10);
-    if (Number.isNaN(size)) return [];
-    const sizeStr = size.toString().padStart(2, '0');
-
-    return normalizedPrefixes.flatMap((prefix) =>
-      colors.map((color) => `${prefix}${color}${sizeStr}`)
-    );
+    const start = parseInt(startSize, 10);
+    const end = parseInt(endSize, 10);
+    if (!Number.isNaN(start) && !Number.isNaN(end) && start <= end && sizeStep > 0) {
+      for (let size = start; size <= end; size += sizeStep) {
+        sizes.push(size);
+      }
+    } else {
+      sizes = parsedSizeList;
+    }
+  } else {
+    sizes = parsedSizeList;
   }
-
-  const start = parseInt(startSize, 10);
-  const end = parseInt(endSize, 10);
-  if (Number.isNaN(start) || Number.isNaN(end) || start > end || sizeStep <= 0) return [];
+  if (sizes.length === 0) return [];
 
   const skus: string[] = [];
+
   for (const prefix of normalizedPrefixes) {
-    const color = colors[0];
-    for (let size = start; size <= end; size += sizeStep) {
-      skus.push(`${prefix}${color}${size.toString().padStart(2, '0')}`);
+    for (const color of colors) {
+      for (const size of sizes) {
+        skus.push(`${prefix}${color}${size.toString().padStart(2, '0')}`);
+      }
     }
   }
   return skus;
+};
+
+const validateGeneratedSkus = (generatedSkus: string[], selectedPrefixes: string[]) => {
+  if (selectedPrefixes.length === 0) {
+    return { valid: false, message: '请至少添加一个产品前缀' };
+  }
+  const colors = new Set<string>();
+  const sizes = new Set<string>();
+  generatedSkus.forEach((sku) => {
+    if (sku.length >= 11) {
+      colors.add(sku.slice(7, 9));
+      sizes.add(sku.slice(9, 11));
+    }
+  });
+
+  if (colors.size === 0 || sizes.size === 0) {
+    return { valid: false, message: '请先填写颜色和尺码条件，生成目标 SKU' };
+  }
+  return { valid: true, message: '' };
 };
 
 export function ProcessButton() {
@@ -65,6 +95,16 @@ export function ProcessButton() {
   const colorList = useProcessStore((state) => state.colorList);
   const setOutputFilename = useProcessStore((state) => state.setOutputFilename);
   const setIsProcessing = useProcessStore((state) => state.setIsProcessing);
+  const liveGeneratedSkus = buildGeneratedSkus(
+    selectedPrefixes,
+    mode,
+    startSize,
+    endSize,
+    sizeStep,
+    colorList
+  );
+  const liveValidation = validateGeneratedSkus(liveGeneratedSkus, selectedPrefixes);
+
   const processMutation = useMutation({
     mutationFn: async (request: Parameters<typeof excelApi.processExcel>[0]) => {
       const start = await excelApi.processExcelAsync(request);
@@ -104,11 +144,6 @@ export function ProcessButton() {
   });
 
   const handleProcess = async () => {
-    if (selectedPrefixes.length === 0) {
-      toast.error('请至少添加一个产品前缀');
-      return;
-    }
-
     setIsProcessing(true);
 
     // 过滤掉模板文件，只传递数据文件
@@ -116,7 +151,7 @@ export function ProcessButton() {
       'EP-2.xlsm',
       'EP-1.xlsm',
       'EP-0.xlsm',
-      'All+Listings+Report.txt',
+      'EP-All+Listings+Report.txt',
     ];
     const sourceFiles = uploadedFiles.length > 0 ? uploadedFiles : fallbackFiles;
 
@@ -132,9 +167,10 @@ export function ProcessButton() {
       sizeStep,
       colorList
     );
-    if (generatedSkus.length === 0) {
+    const validation = validateGeneratedSkus(generatedSkus, selectedPrefixes);
+    if (!validation.valid) {
       setIsProcessing(false);
-      toast.error('请先填写颜色和尺码条件，生成目标 SKU');
+      toast.error(validation.message);
       return;
     }
 
@@ -150,10 +186,11 @@ export function ProcessButton() {
   };
 
   const isDisabled =
-    selectedPrefixes.length === 0 ||
+    !liveValidation.valid ||
     processMutation.isPending;
 
   return (
+    <>
     <button
       onClick={handleProcess}
       disabled={isDisabled}
@@ -211,5 +248,9 @@ export function ProcessButton() {
         </span>
       )}
     </button>
+    {(!processMutation.isPending && !liveValidation.valid) && (
+      <p className="mt-2 text-xs text-red-600">{liveValidation.message}</p>
+    )}
+    </>
   );
 }
