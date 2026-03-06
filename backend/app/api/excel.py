@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.config import UPLOADS_DIR, TEMPLATES
+from app.config import UPLOADS_DIR, RESULTS_DIR, TEMPLATES, STORE_CONFIGS
 from app.core.excel_processor import excel_processor
 from app.core.export_history import export_history
 from app.core.follow_sell_processor import follow_sell_processor
@@ -105,15 +105,16 @@ def _run_process_job(job_id: str, request: ProcessRequest) -> None:
             })
 
 
-def _resolve_follow_sell_source_files() -> List[str]:
-    source_files = [name for name in ["EP-2.xlsm", "EP-0.xlsm", "EP-1.xlsm"] if (UPLOADS_DIR / name).exists()]
-    txt_files = sorted(
-        [p.name for p in UPLOADS_DIR.glob("*.txt") if p.is_file()],
-        key=lambda filename: (UPLOADS_DIR / filename).stat().st_mtime,
-        reverse=True,
-    )
-    if txt_files:
-        source_files.append(txt_files[0])
+def _resolve_store_config(template_type: Optional[str]) -> Dict:
+    return STORE_CONFIGS.get(str(template_type or "").strip(), STORE_CONFIGS["EPUS"])
+
+
+def _resolve_follow_sell_source_files(template_type: Optional[str] = "EPUS") -> List[str]:
+    store_config = _resolve_store_config(template_type)
+    source_files = [name for name in store_config["source_files"] if (UPLOADS_DIR / name).exists()]
+    listing_report = str(store_config["listing_report"])
+    if (UPLOADS_DIR / listing_report).exists():
+        source_files.append(listing_report)
     return source_files
 
 
@@ -121,22 +122,24 @@ def _build_follow_sell_filename(skc_tag: str) -> str:
     normalized_skc = re.sub(r"[^A-Z0-9]", "", str(skc_tag or "").strip().upper()) or "UNKNOWN"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"followsell_{normalized_skc}_{timestamp}.xlsx"
-    output_path = UPLOADS_DIR / filename
+    output_path = RESULTS_DIR / filename
     suffix = 1
     while output_path.exists():
         filename = f"followsell_{normalized_skc}_{timestamp}_{suffix}.xlsx"
-        output_path = UPLOADS_DIR / filename
+        output_path = RESULTS_DIR / filename
         suffix += 1
     return filename
 
 
 def _rename_follow_sell_export(original_filename: str, skc_tag: str) -> tuple[str, int]:
-    source_path = UPLOADS_DIR / original_filename
+    source_path = RESULTS_DIR / original_filename
+    if not source_path.exists():
+        source_path = UPLOADS_DIR / original_filename
     if not source_path.exists():
         raise FileNotFoundError(f"导出文件不存在: {original_filename}")
 
     target_filename = _build_follow_sell_filename(skc_tag)
-    target_path = UPLOADS_DIR / target_filename
+    target_path = RESULTS_DIR / target_filename
     source_path.rename(target_path)
     return target_filename, int(target_path.stat().st_size)
 
@@ -161,9 +164,19 @@ def _is_allowed_data_filename(filename: str) -> bool:
     normalized = str(filename or "").strip()
     if not normalized:
         return False
-    if normalized in {"EP-0.xlsm", "EP-1.xlsm", "EP-2.xlsm"}:
+    allowed_xlsm = {
+        source_file
+        for config in STORE_CONFIGS.values()
+        for source_file in config.get("source_files", [])
+    }
+    if normalized in allowed_xlsm:
         return True
-    return normalized.lower() == "ep-all+listings+report.txt"
+    allowed_reports = {
+        str(config.get("listing_report", "")).lower()
+        for config in STORE_CONFIGS.values()
+        if config.get("listing_report")
+    }
+    return normalized.lower() in allowed_reports
 
 
 def _validate_selection_constraints(generated_skus: Optional[List[str]]) -> None:
@@ -186,7 +199,9 @@ def _record_export_history(
     processed_count: int,
 ) -> None:
     try:
-        file_path = UPLOADS_DIR / filename
+        file_path = RESULTS_DIR / filename
+        if not file_path.exists():
+            file_path = UPLOADS_DIR / filename
         file_size = int(file_path.stat().st_size) if file_path.exists() else 0
         export_history.add_record(
             module=module,
@@ -200,6 +215,13 @@ def _record_export_history(
         export_history.cleanup(retention_days=90, max_records=1000)
     except Exception as exc:
         print(f"[export-history] 记录失败: {exc}")
+
+
+def _resolve_generated_file_path(filename: str) -> Path:
+    result_path = RESULTS_DIR / filename
+    if result_path.exists():
+        return result_path
+    return UPLOADS_DIR / filename
 
 
 @router.get("/templates", response_model=List[TemplateInfo])
@@ -222,7 +244,7 @@ async def analyze_file(file: UploadFile = File(...)):
         if not _is_allowed_data_filename(file.filename):
             raise HTTPException(
                 status_code=400,
-                detail="仅支持上传 EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt"
+                detail="仅支持上传 DA/EP/PZ 店铺的 -0/-1/-2.xlsm 和 All+Listings+Report.txt 数据文件"
             )
         # 保存上传的文件
         file_path = UPLOADS_DIR / file.filename
@@ -420,7 +442,7 @@ async def download_export_history_file(history_id: int):
         raise HTTPException(status_code=404, detail="历史记录不存在")
 
     filename = record["filename"]
-    file_path = UPLOADS_DIR / filename
+    file_path = _resolve_generated_file_path(filename)
     if not file_path.exists():
         export_history.update_status(history_id, "file_missing")
         return JSONResponse(
@@ -445,7 +467,7 @@ async def delete_export_history(history_id: int):
     deleted_file = False
     filename = record.get("filename", "")
     if filename:
-        file_path = UPLOADS_DIR / filename
+        file_path = _resolve_generated_file_path(filename)
         if file_path.exists():
             try:
                 os.remove(file_path)
@@ -464,7 +486,7 @@ async def delete_export_history(history_id: int):
 @router.get("/download/{filename}")
 async def download_file(filename: str):
     """下载生成的文件"""
-    file_path = UPLOADS_DIR / filename
+    file_path = _resolve_generated_file_path(filename)
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
@@ -514,10 +536,13 @@ async def query_skc(request: SKCQueryRequest):
     """查询 SKC 对应的所有尺码信息
 
     根据输入的 SKC（7位款号+2位颜色），通过新老款映射表查找老款号，
-    然后在 EP-0/1/2 聚合表中查找所有尺码信息
+    然后在对应店铺的 -0/-1/-2 聚合表中查找所有尺码信息
     """
     try:
-        result = follow_sell_processor.find_sizes_for_skc(request.skc)
+        result = follow_sell_processor.find_sizes_for_skc(
+            skc=request.skc,
+            template_type=request.template_type,
+        )
         return SKCQueryResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询 SKC 失败: {str(e)}")
@@ -527,7 +552,10 @@ async def query_skc(request: SKCQueryRequest):
 async def process_skc(request: SKCProcessRequest):
     """根据 SKC 自动匹配老款尺码并导出模板 Excel"""
     try:
-        query_result = follow_sell_processor.find_sizes_for_skc(request.skc)
+        query_result = follow_sell_processor.find_sizes_for_skc(
+            skc=request.skc,
+            template_type=request.template_type,
+        )
         if not query_result.get("success"):
             raise HTTPException(status_code=400, detail=query_result.get("message", "SKC 查询失败"))
 
@@ -536,10 +564,11 @@ async def process_skc(request: SKCProcessRequest):
         if not generated_skus:
             raise HTTPException(status_code=400, detail="未生成有效 SKU，无法导出")
 
-        source_files = _resolve_follow_sell_source_files()
+        source_files = _resolve_follow_sell_source_files(request.template_type)
 
         if len(source_files) < 3:
-            raise HTTPException(status_code=400, detail="缺少 EP-0/1/2 数据文件，无法导出")
+            store_prefix = _resolve_store_config(request.template_type)["prefix"]
+            raise HTTPException(status_code=400, detail=f"缺少 {store_prefix}-0/{store_prefix}-1/{store_prefix}-2 数据文件，无法导出")
 
         output_filename, _processed_count = excel_processor.process_excel(
             template_type=request.template_type,
@@ -595,7 +624,10 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
         success_results = []
         failed_count = 0
         for skc in normalized_skcs:
-            result = follow_sell_processor.find_sizes_for_skc(skc)
+            result = follow_sell_processor.find_sizes_for_skc(
+                skc=skc,
+                template_type=request.template_type,
+            )
             if result.get("success"):
                 success_results.append(result)
             else:
@@ -620,9 +652,10 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
         if not generated_skus:
             raise HTTPException(status_code=400, detail="未生成有效 SKU，无法导出")
 
-        source_files = _resolve_follow_sell_source_files()
+        source_files = _resolve_follow_sell_source_files(request.template_type)
         if len(source_files) < 3:
-            raise HTTPException(status_code=400, detail="缺少 EP-0/1/2 数据文件，无法导出")
+            store_prefix = _resolve_store_config(request.template_type)["prefix"]
+            raise HTTPException(status_code=400, detail=f"缺少 {store_prefix}-0/{store_prefix}-1/{store_prefix}-2 数据文件，无法导出")
 
         output_filename, _processed_count = excel_processor.process_excel(
             template_type=request.template_type,

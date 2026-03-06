@@ -35,7 +35,7 @@ class AnalysisResult(BaseModel):
 
 class ProcessRequest(BaseModel):
     """Excel 处理请求模型"""
-    template_type: str = Field(..., description="模板类型：DaMaUS 或 EPUS")
+    template_type: str = Field(..., description="模板类型：DaMaUS / EPUS / PZUS")
     filenames: List[str] = Field(..., description="要处理的文件名列表")
     selected_prefixes: List[str] = Field(..., description="选中的 SKU 前缀列表")
     mode: Optional[str] = Field("add-color", description="处理模式：add-color / add-code")
@@ -87,6 +87,7 @@ class FileInfo(BaseModel):
 class SKCQueryRequest(BaseModel):
     """SKC 查询请求模型"""
     skc: str = Field(..., description="SKC 字符串，格式为 7位style + 2位color，如 ES0128BDG")
+    template_type: str = Field("EPUS", description="模板类型：DaMaUS / EPUS / PZUS")
 
 
 class SKCSize(BaseModel):

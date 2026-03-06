@@ -5,8 +5,12 @@
 import sqlite3
 import openpyxl
 import re
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from app.config import UPLOADS_DIR
+from app.config import UPLOADS_DIR, STORE_CONFIGS
+
+STORE_PREFIX_PATTERN = re.compile(r"^(EP|DM|DA|PZ)-\d", re.IGNORECASE)
+STORE_PRIORITY = ("EP", "DM", "PZ")
 
 
 class FollowSellProcessor:
@@ -14,12 +18,12 @@ class FollowSellProcessor:
 
     def __init__(self):
         self.new_to_old_mapping: Dict[str, str] = {}
-        self.ep_data_cache: Dict[str, List[Dict]] = {}  # old_style -> [sku_data]
-        self.ep_loaded = False
         self._last_parse_error = ""
-        self.index_db_path = UPLOADS_DIR / "ep_index.db"
+        legacy_db_path = UPLOADS_DIR / "ep_index.db"
+        if legacy_db_path.exists():
+            print("警告: 检测到旧索引库 ep_index.db，请重新上传店铺数据源以重建 EP/DM/PZ 分店铺索引。")
         self._load_mapping()
-        # 不在初始化时加载 EP 数据，改为懒加载
+        # 不在初始化时加载店铺索引，按店铺懒加载
 
     def _build_files_signature(self, filenames: List[str]) -> str:
         parts: List[str] = []
@@ -31,8 +35,30 @@ class FollowSellProcessor:
             parts.append(f"{filename}:{stat.st_mtime_ns}:{stat.st_size}")
         return "|".join(parts)
 
-    def _connect_db(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.index_db_path)
+    def _normalize_store_prefix(self, store_prefix: Optional[str]) -> str:
+        normalized = str(store_prefix or "").strip().upper()
+        if normalized == "DA":
+            normalized = "DM"
+        if normalized not in STORE_PRIORITY:
+            normalized = "EP"
+        return normalized
+
+    def get_store_prefix(self, template_type: Optional[str]) -> str:
+        text = str(template_type or "").strip().upper()
+        if "PZ" in text:
+            return "PZ"
+        if "DM" in text or "DAMA" in text or text.startswith("DA"):
+            return "DM"
+        if "EP" in text:
+            return "EP"
+        return "EP"
+
+    def get_index_db_path(self, store_prefix: str) -> Path:
+        normalized = self._normalize_store_prefix(store_prefix)
+        return UPLOADS_DIR / f"ep_index_{normalized}.db"
+
+    def _connect_db(self, store_prefix: str) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.get_index_db_path(store_prefix))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
@@ -49,6 +75,7 @@ class FollowSellProcessor:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ep_sku_index (
+                store_prefix TEXT NOT NULL DEFAULT 'EP',
                 style TEXT NOT NULL,
                 sku TEXT NOT NULL,
                 size TEXT NOT NULL,
@@ -58,48 +85,92 @@ class FollowSellProcessor:
             )
             """
         )
+        columns = {str(row[1]).lower() for row in conn.execute("PRAGMA table_info(ep_sku_index)").fetchall()}
+        if "store_prefix" not in columns:
+            conn.execute("ALTER TABLE ep_sku_index ADD COLUMN store_prefix TEXT NOT NULL DEFAULT 'EP'")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_style ON ep_sku_index(style)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_style_size ON ep_sku_index(style, size)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_store_style ON ep_sku_index(store_prefix, style)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_store_style_size ON ep_sku_index(store_prefix, style, size)")
         conn.commit()
 
-    def _ensure_ep_index(self) -> None:
-        """确保 EP 索引可用，文件变化时自动重建"""
-        ep_files = ['EP-0.xlsm', 'EP-1.xlsm', 'EP-2.xlsm']
+    def _scan_store_data_files(self) -> Dict[str, List[str]]:
+        files_by_store: Dict[str, List[str]] = {store: [] for store in STORE_PRIORITY}
+        for path in sorted(UPLOADS_DIR.iterdir()):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in {".xlsm", ".xlsx"}:
+                continue
+            match = STORE_PREFIX_PATTERN.match(path.name.strip().upper())
+            if not match:
+                continue
+            store_prefix = self._normalize_store_prefix(match.group(1))
+            files_by_store[store_prefix].append(path.name)
+        return {
+            store: sorted({name for name in names})
+            for store, names in files_by_store.items()
+        }
+
+    def _resolve_store_files(self, store_prefix: str) -> List[str]:
+        normalized = self._normalize_store_prefix(store_prefix)
+        scanned_files = self._scan_store_data_files()
+        resolved = list(scanned_files.get(normalized, []))
+
+        for template_type, config in STORE_CONFIGS.items():
+            if self.get_store_prefix(template_type) != normalized:
+                continue
+            for file_name in config.get("source_files", []):
+                file_text = str(file_name)
+                if file_text not in resolved:
+                    resolved.append(file_text)
+
+        if resolved:
+            return sorted(resolved)
+
+        if normalized == "DM":
+            return ["DA-0.xlsm", "DA-1.xlsm", "DA-2.xlsm", "DM-0.xlsm", "DM-1.xlsm", "DM-2.xlsm"]
+        return [f"{normalized}-0.xlsm", f"{normalized}-1.xlsm", f"{normalized}-2.xlsm"]
+
+    def _ensure_store_index(self, store_prefix: str) -> None:
+        """确保指定店铺索引可用，文件变化时自动重建"""
+        normalized_prefix = self._normalize_store_prefix(store_prefix)
+        source_files = self._resolve_store_files(normalized_prefix)
         sku_pattern = re.compile(
             r"^(?P<style>[A-Z0-9]{7})(?P<color>[A-Z]{2})(?P<size>\d{2})(?P<suffix>-?[A-Z0-9]+)?$"
         )
-        signature = self._build_files_signature(ep_files)
+        signature = self._build_files_signature(source_files)
         if not signature:
             return
 
-        conn = self._connect_db()
+        conn = self._connect_db(normalized_prefix)
         try:
             self._ensure_index_tables(conn)
-            row = conn.execute("SELECT value FROM meta WHERE key='ep_signature'").fetchone()
+            signature_key = f"signature:{normalized_prefix}"
+            row = conn.execute("SELECT value FROM meta WHERE key=?", (signature_key,)).fetchone()
             current = row[0] if row else ""
             if current == signature:
                 return
 
-            print("EP 文件有更新，正在重建 SQLite 索引...")
-            conn.execute("DELETE FROM ep_sku_index")
+            print(f"{normalized_prefix} 文件有更新，正在重建 SQLite 索引...")
+            conn.execute("DELETE FROM ep_sku_index WHERE store_prefix = ?", (normalized_prefix,))
 
             insert_sql = """
-                INSERT OR REPLACE INTO ep_sku_index(style, sku, size, suffix, source_file)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO ep_sku_index(store_prefix, style, sku, size, suffix, source_file)
+                VALUES (?, ?, ?, ?, ?, ?)
             """
             total_filtered = 0
 
-            for ep_file in ep_files:
-                file_path = UPLOADS_DIR / ep_file
+            for source_file in source_files:
+                file_path = UPLOADS_DIR / source_file
                 if not file_path.exists():
-                    print(f"警告: EP 文件不存在: {ep_file}")
+                    print(f"警告: 店铺文件不存在: {source_file}")
                     continue
                 try:
                     wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
                     ws = wb['Template']
                     row_count = 0
                     filtered_count = 0
-                    batch: List[Tuple[str, str, str, str, str]] = []
+                    batch: List[Tuple[str, str, str, str, str, str]] = []
                     for row in ws.iter_rows(min_row=7, min_col=3, max_col=3, values_only=True):
                         sku_cell = row[0] if row else None
                         if not sku_cell:
@@ -112,7 +183,7 @@ class FollowSellProcessor:
                         style = matched.group("style")
                         size = matched.group("size")
                         suffix = matched.group("suffix") or ""
-                        batch.append((style, sku, size, suffix, ep_file))
+                        batch.append((normalized_prefix, style, sku, size, suffix, source_file))
                         row_count += 1
                         if len(batch) >= 5000:
                             conn.executemany(insert_sql, batch)
@@ -123,14 +194,14 @@ class FollowSellProcessor:
                         conn.commit()
                     wb.close()
                     total_filtered += filtered_count
-                    print(f"  {ep_file} 索引完成，共 {row_count} 行，过滤无效 SKU {filtered_count} 行")
+                    print(f"  {source_file} 索引完成，共 {row_count} 行，过滤无效 SKU {filtered_count} 行")
                 except Exception as e:
-                    print(f"加载 {ep_file} 失败: {e}")
-            print(f"EP 索引重建完成，累计过滤无效 SKU {total_filtered} 行")
+                    print(f"加载 {source_file} 失败: {e}")
+            print(f"{normalized_prefix} 索引重建完成，累计过滤无效 SKU {total_filtered} 行")
 
             conn.execute(
-                "INSERT OR REPLACE INTO meta(key, value) VALUES('ep_signature', ?)",
-                (signature,)
+                "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                (signature_key, signature)
             )
             conn.commit()
         finally:
@@ -162,8 +233,8 @@ class FollowSellProcessor:
             print(f"加载新老款映射失败: {e}")
 
     def _load_ep_data(self):
-        """兼容旧接口：现在改为确保 SQLite 索引"""
-        self._ensure_ep_index()
+        """兼容旧接口：默认确保 EP 店铺索引"""
+        self._ensure_store_index("EP")
 
     def parse_skc(self, skc: str) -> Optional[Tuple[str, str]]:
         """解析 SKC 格式
@@ -205,7 +276,21 @@ class FollowSellProcessor:
             return "-PH"
         return normalized
 
-    def find_sizes_for_skc(self, skc: str) -> Dict:
+    def _generate_suffix_for_store(self, store_prefix: str, size: str) -> str:
+        """根据店铺和尺码生成标准后缀。"""
+        size_text = str(size or "")
+        match = re.search(r"\d+", size_text)
+        size_num = int(match.group()) if match else 0
+        is_plus = size_num >= 14
+
+        normalized_store = self._normalize_store_prefix(store_prefix)
+        if normalized_store == "DM":
+            return "-PLPH" if is_plus else "-PL"
+        if normalized_store == "PZ":
+            return "-DAPH" if is_plus else "-DA"
+        return "-PH" if is_plus else "-USA"
+
+    def find_sizes_for_skc(self, skc: str, template_type: str = "EPUS") -> Dict:
         """根据 SKC 查找所有尺码信息
 
         Args:
@@ -222,10 +307,8 @@ class FollowSellProcessor:
                 'message': str
             }
         """
-        # 懒加载 EP 数据
-        if not self.ep_loaded:
-            self._load_ep_data()
-            self.ep_loaded = True
+        store_prefix = self._normalize_store_prefix(self.get_store_prefix(template_type))
+        self._ensure_store_index(store_prefix)
 
         result = {
             'success': False,
@@ -256,32 +339,35 @@ class FollowSellProcessor:
 
         result['old_style'] = old_style
 
-        # 3. 在 EP SQLite 索引中查找老款号“同颜色”的所有尺码
-        conn = self._connect_db()
+        # 3. 在店铺 SQLite 索引中查找老款号“同颜色”的所有尺码
+        conn = self._connect_db(store_prefix)
         try:
             rows = conn.execute(
                 """
-                SELECT DISTINCT size, suffix
+                SELECT DISTINCT size
                 FROM ep_sku_index
-                WHERE style = ?
+                WHERE store_prefix = ?
+                  AND style = ?
                   AND substr(sku, 8, 2) = ?
-                ORDER BY size, suffix
+                ORDER BY size
                 """,
-                (old_style, color_code)
+                (store_prefix, old_style, color_code)
             ).fetchall()
         finally:
             conn.close()
 
         if not rows:
-            result['message'] = f"在 EP-0/1/2 聚合表中未找到老款号 {old_style} 颜色 {color_code} 的数据"
+            result['message'] = (
+                f"在 {store_prefix} 店铺聚合表中未找到老款号 {old_style} 颜色 {color_code} 的数据"
+            )
             return result
 
         # 5. 构建结果
         normalized_items: List[Dict[str, str]] = []
         seen = set()
-        for size, suffix in rows:
+        for (size,) in rows:
             size_str = str(size)
-            suffix_str = self._normalize_suffix(str(suffix or ""))
+            suffix_str = self._generate_suffix_for_store(store_prefix, size_str)
             key = (size_str, suffix_str)
             if key in seen:
                 continue
@@ -299,8 +385,15 @@ class FollowSellProcessor:
 
         return result
 
-    def get_sku_data_from_ep(self, old_style: str, color_code: str, size: str, suffix: str) -> Optional[List]:
-        """从 EP 数据中获取指定 SKU 的完整行数据
+    def get_sku_data_from_ep(
+        self,
+        old_style: str,
+        color_code: str,
+        size: str,
+        suffix: str,
+        template_type: str = "EPUS",
+    ) -> Optional[List]:
+        """从店铺数据中获取指定 SKU 的完整行数据
 
         Args:
             old_style: 老款号（7位）
@@ -313,12 +406,13 @@ class FollowSellProcessor:
         """
         # 构建老款号的 SKU
         target_sku = f"{old_style}{color_code}{size}{suffix}"
-        self._ensure_ep_index()
-        conn = self._connect_db()
+        store_prefix = self._normalize_store_prefix(self.get_store_prefix(template_type))
+        self._ensure_store_index(store_prefix)
+        conn = self._connect_db(store_prefix)
         try:
             row = conn.execute(
-                "SELECT source_file FROM ep_sku_index WHERE style = ? AND sku = ? LIMIT 1",
-                (old_style, target_sku)
+                "SELECT source_file FROM ep_sku_index WHERE store_prefix = ? AND style = ? AND sku = ? LIMIT 1",
+                (store_prefix, old_style, target_sku)
             ).fetchone()
         finally:
             conn.close()

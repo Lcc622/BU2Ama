@@ -10,6 +10,7 @@ type SKCQueryItem = {
 
 export const FollowSellUpload: React.FC = () => {
   const [skcInput, setSkcInput] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState<'DaMaUS' | 'EPUS' | 'PZUS'>('EPUS');
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryResults, setQueryResults] = useState<SKCQueryItem[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
@@ -46,7 +47,7 @@ export const FollowSellUpload: React.FC = () => {
     try {
       const settled = await Promise.allSettled(
         skcList.map(async (skc) => {
-          const result = await excelApi.queryFollowSellSkc(skc);
+          const result = await excelApi.queryFollowSellSkc(skc, selectedTemplate);
           return { inputSkc: skc, result };
         })
       );
@@ -92,7 +93,7 @@ export const FollowSellUpload: React.FC = () => {
     setExportingSkc(skc);
     setQueryError(null);
     try {
-      const response = await excelApi.processFollowSellSkc(skc, 'EPUS');
+      const response = await excelApi.processFollowSellSkc(skc, selectedTemplate);
       if (response.success && response.output_filename) {
         triggerDownloadByFilename(response.output_filename);
       } else {
@@ -117,7 +118,7 @@ export const FollowSellUpload: React.FC = () => {
     setBatchExporting(true);
     setQueryError(null);
     try {
-      const response = await excelApi.processFollowSellSkcBatch(successSkcs, 'EPUS');
+      const response = await excelApi.processFollowSellSkcBatch(successSkcs, selectedTemplate);
       if (response.success && response.output_filename) {
         triggerDownloadByFilename(response.output_filename);
       } else {
@@ -134,6 +135,46 @@ export const FollowSellUpload: React.FC = () => {
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div className="bg-white rounded-lg shadow-md p-6">
         <h2 className="text-2xl font-bold mb-6">SKC 尺码查询（跟卖映射）</h2>
+
+        {/* 店铺选择按钮 */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2">选择店铺模板</label>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setSelectedTemplate('DaMaUS')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                selectedTemplate === 'DaMaUS'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              DaMaUS
+            </button>
+            <button
+              onClick={() => setSelectedTemplate('EPUS')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                selectedTemplate === 'EPUS'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              EPUS
+            </button>
+            <button
+              onClick={() => setSelectedTemplate('PZUS')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                selectedTemplate === 'PZUS'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              PZUS
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            选择 {selectedTemplate} 将从对应店铺的源数据中查询和导出
+          </p>
+        </div>
 
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -162,7 +203,7 @@ export const FollowSellUpload: React.FC = () => {
               </button>
             </div>
           </div>
-          <p className="mt-1 text-xs text-gray-500">按每条 SKC 自动查新老款映射，再到 EP-0/1/2 聚合表提取全部尺码</p>
+          <p className="mt-1 text-xs text-gray-500">按每条 SKC 自动查新老款映射，再到 {selectedTemplate === 'DaMaUS' ? 'DA' : selectedTemplate === 'PZUS' ? 'PZ' : 'EP'}-0/1/2 聚合表提取全部尺码</p>
         </div>
 
         {queryError && (

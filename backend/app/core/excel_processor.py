@@ -17,9 +17,13 @@ from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.utils import get_column_letter
 
-from app.config import UPLOADS_DIR, TEMPLATES
+from app.config import UPLOADS_DIR, RESULTS_DIR, TEMPLATES
 from app.core.color_mapper import color_mapper
 from app.models.excel import SKUInfo, ColorDistribution, AnalysisResult
+
+STORE_PREFIX_PATTERN = re.compile(r"^(EP|DM|DA|PZ)-", re.IGNORECASE)
+STORE_SOURCE_FILE_PATTERN = re.compile(r"^(EP|DM|DA|PZ)-\d", re.IGNORECASE)
+STORE_PRIORITY = ("EP", "DM", "PZ")
 
 
 class ExcelProcessor:
@@ -27,19 +31,141 @@ class ExcelProcessor:
 
     def __init__(self):
         # 缓存：减少重复读取 EP 源表和价格报告
-        self._price_map_cache: Dict[Tuple[Tuple[str, int, int], ...], Dict[str, float]] = {}
+        self._price_map_cache: Dict[Tuple[str, Tuple[Tuple[str, int, int], ...]], Dict[str, float]] = {}
         self._asin_map_cache: Dict[Tuple[Tuple[str, int, int], ...], Dict[str, str]] = {}
-        self._source_index_cache: Dict[Tuple[Tuple[str, int, int], ...], Dict[str, Any]] = {}
+        self._source_index_cache: Dict[Tuple[str, Tuple[Tuple[str, int, int], ...]], Dict[str, Any]] = {}
         # 缓存模板快照：避免每次任务都慢速 load_workbook(xlsm)
         self._template_snapshot_cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
         self._template_cache_lock = Lock()
-        self._index_db_path = UPLOADS_DIR / "excel_index.db"
+        legacy_db_path = UPLOADS_DIR / "excel_index.db"
+        if legacy_db_path.exists():
+            print("警告: 检测到旧索引库 excel_index.db，请重新上传店铺数据源以重建分店铺索引。")
+
+    def get_store_prefix(self, filename: str) -> str:
+        match = STORE_PREFIX_PATTERN.match(str(filename or "").strip().upper())
+        if match:
+            return self._normalize_store_prefix(match.group(1))
+        return "EP"
+
+    def _normalize_store_prefix(self, store_prefix: Optional[str]) -> str:
+        normalized = str(store_prefix or "").strip().upper()
+        if normalized == "DA":
+            normalized = "DM"
+        if normalized not in STORE_PRIORITY:
+            normalized = "EP"
+        return normalized
+
+    def get_index_db_path(self, store_prefix: str) -> Path:
+        normalized = self._normalize_store_prefix(store_prefix)
+        return UPLOADS_DIR / f"excel_index_{normalized}.db"
+
+    def _resolve_store_for_filename(self, filename: Optional[str], fallback_store: Optional[str] = None) -> str:
+        fallback = self._normalize_store_prefix(fallback_store)
+        if not filename:
+            return fallback
+        if STORE_PREFIX_PATTERN.match(str(filename).strip().upper()):
+            return self.get_store_prefix(filename)
+        return fallback
+
+    def _guess_store_from_template_type(self, template_type: Optional[str]) -> Optional[str]:
+        text = str(template_type or "").strip().upper()
+        if not text:
+            return None
+        if "PZ" in text:
+            return "PZ"
+        if "DM" in text or "DAMA" in text or text.startswith("DA"):
+            return "DM"
+        if "EP" in text:
+            return "EP"
+        return None
+
+    def _get_store_suffix_family(self, template_type: Optional[str]) -> Tuple[str, str]:
+        """返回当前模板所属店铺的标准后缀族。
+
+        Returns:
+            (base_suffix, plus_suffix)
+
+        约定：
+        - EP: ``-USA`` / ``-PH``
+        - DAMA(DM): ``-PL`` / ``-PLPH``
+        - PZ: ``-DA`` / ``-DAPH``
+        """
+        store_prefix = self._guess_store_from_template_type(template_type)
+        normalized_store = self._normalize_store_prefix(store_prefix)
+        if normalized_store == "DM":
+            return "-PL", "-PLPH"
+        if normalized_store == "PZ":
+            return "-DA", "-DAPH"
+        return "-USA", "-PH"
+
+    def _is_plus_body_suffix(self, suffix: Optional[str]) -> bool:
+        """判断后缀是否属于大码/Plus Body 后缀。"""
+        normalized = str(suffix or "").strip().upper()
+        if not normalized:
+            return False
+        if not normalized.startswith("-"):
+            normalized = f"-{normalized}"
+        return normalized in {"-PH", "-PLPH", "-DAPH"}
+
+    def _generate_suffix(self, template_type: Optional[str], size: Any) -> str:
+        """根据模板类型和尺码生成标准后缀。"""
+        size_text = str(size or "")
+        match = re.search(r"\d+", size_text)
+        size_num = int(match.group()) if match else 0
+        base_suffix, plus_suffix = self._get_store_suffix_family(template_type)
+        return plus_suffix if size_num >= 14 else base_suffix
+
+    def _guess_store_from_skus(self, skus: Optional[List[str]]) -> Optional[str]:
+        if not skus:
+            return None
+        for sku in skus:
+            match = STORE_PREFIX_PATTERN.match(str(sku or "").strip().upper())
+            if match:
+                return self._normalize_store_prefix(match.group(1))
+        return None
+
+    def _build_store_search_order(self, preferred_store: Optional[str]) -> List[str]:
+        normalized = self._normalize_store_prefix(preferred_store)
+        if normalized in STORE_PRIORITY:
+            return [normalized] + [store for store in STORE_PRIORITY if store != normalized]
+        return list(STORE_PRIORITY)
+
+    def _scan_store_data_files(self) -> Dict[str, List[str]]:
+        files_by_store: Dict[str, List[str]] = {store: [] for store in STORE_PRIORITY}
+        for path in sorted(UPLOADS_DIR.iterdir()):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in {".xlsm", ".xlsx"}:
+                continue
+            if not STORE_PREFIX_PATTERN.match(path.name.strip().upper()):
+                continue
+            if not STORE_SOURCE_FILE_PATTERN.match(path.name.strip().upper()):
+                continue
+            store_prefix = self.get_store_prefix(path.name)
+            files_by_store[store_prefix].append(path.name)
+        return files_by_store
+
+    def _build_store_data_files(
+        self,
+        request_data_files: List[str],
+        context_store: Optional[str],
+    ) -> Dict[str, List[str]]:
+        scanned_files = self._scan_store_data_files()
+        normalized_context = self._normalize_store_prefix(context_store)
+        for file_name in request_data_files:
+            store_prefix = self._resolve_store_for_filename(file_name, normalized_context)
+            if file_name not in scanned_files[store_prefix]:
+                scanned_files[store_prefix].append(file_name)
+        return {
+            store: sorted({name for name in names})
+            for store, names in scanned_files.items()
+        }
 
     def _signature_to_key(self, signature: Tuple[Tuple[str, int, int], ...]) -> str:
         return "|".join([f"{name}:{mtime}:{size}" for name, mtime, size in signature])
 
-    def _connect_index_db(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._index_db_path)
+    def _connect_index_db(self, store_prefix: str) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.get_index_db_path(store_prefix))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
@@ -89,8 +215,8 @@ class ExcelProcessor:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_headers_signature ON source_headers_index(signature, data_file)")
         conn.commit()
 
-    def _load_price_map_from_sqlite(self, signature_key: str) -> Optional[Dict[str, float]]:
-        conn = self._connect_index_db()
+    def _load_price_map_from_sqlite(self, signature_key: str, store_prefix: str) -> Optional[Dict[str, float]]:
+        conn = self._connect_index_db(store_prefix)
         try:
             self._ensure_index_tables(conn)
             rows = conn.execute(
@@ -103,8 +229,8 @@ class ExcelProcessor:
         finally:
             conn.close()
 
-    def _save_price_map_to_sqlite(self, signature_key: str, price_map: Dict[str, float]) -> None:
-        conn = self._connect_index_db()
+    def _save_price_map_to_sqlite(self, signature_key: str, price_map: Dict[str, float], store_prefix: str) -> None:
+        conn = self._connect_index_db(store_prefix)
         try:
             self._ensure_index_tables(conn)
             conn.execute("DELETE FROM price_index WHERE signature = ?", (signature_key,))
@@ -117,8 +243,8 @@ class ExcelProcessor:
         finally:
             conn.close()
 
-    def _load_source_index_from_sqlite(self, signature_key: str) -> Optional[Dict[str, Any]]:
-        conn = self._connect_index_db()
+    def _load_source_index_from_sqlite(self, signature_key: str, store_prefix: str) -> Optional[Dict[str, Any]]:
+        conn = self._connect_index_db(store_prefix)
         try:
             self._ensure_index_tables(conn)
             source_rows_db = conn.execute(
@@ -218,8 +344,8 @@ class ExcelProcessor:
             "source_header_map_by_file": source_header_map_by_file,
         }
 
-    def _save_source_index_to_sqlite(self, signature_key: str, index_data: Dict[str, Any]) -> None:
-        conn = self._connect_index_db()
+    def _save_source_index_to_sqlite(self, signature_key: str, index_data: Dict[str, Any], store_prefix: str) -> None:
+        conn = self._connect_index_db(store_prefix)
         try:
             self._ensure_index_tables(conn)
             conn.execute("DELETE FROM source_rows_index WHERE signature = ?", (signature_key,))
@@ -384,17 +510,19 @@ class ExcelProcessor:
                 results[template_file] = "error"
         return results
 
-    def _load_price_map_cached(self, price_report_file: Optional[str]) -> Dict[str, float]:
+    def _load_price_map_cached(self, price_report_file: Optional[str], store_prefix: str) -> Dict[str, float]:
         if not price_report_file:
             return {}
+        normalized_store = self._resolve_store_for_filename(price_report_file, store_prefix)
         signature = self._build_files_signature([price_report_file])
         signature_key = self._signature_to_key(signature)
-        if signature in self._price_map_cache:
-            print(f"价格映射命中缓存 {len(self._price_map_cache[signature])} 条")
-            return self._price_map_cache[signature]
-        sqlite_cached = self._load_price_map_from_sqlite(signature_key)
+        cache_key = (normalized_store, signature)
+        if cache_key in self._price_map_cache:
+            print(f"价格映射命中缓存 {len(self._price_map_cache[cache_key])} 条")
+            return self._price_map_cache[cache_key]
+        sqlite_cached = self._load_price_map_from_sqlite(signature_key, normalized_store)
         if sqlite_cached is not None:
-            self._price_map_cache[signature] = sqlite_cached
+            self._price_map_cache[cache_key] = sqlite_cached
             print(f"价格映射命中 SQLite 缓存 {len(sqlite_cached)} 条")
             return sqlite_cached
 
@@ -417,8 +545,8 @@ class ExcelProcessor:
                     break
                 except UnicodeDecodeError:
                     continue
-        self._price_map_cache[signature] = price_map
-        self._save_price_map_to_sqlite(signature_key, price_map)
+        self._price_map_cache[cache_key] = price_map
+        self._save_price_map_to_sqlite(signature_key, price_map, normalized_store)
         print(f"价格映射加载 {len(price_map)} 条")
         return price_map
 
@@ -450,21 +578,23 @@ class ExcelProcessor:
         print(f"ASIN 映射加载 {len(asin_map)} 条")
         return asin_map
 
-    def _build_source_index_cached(self, data_files: List[str]) -> Dict[str, Any]:
+    def _build_source_index_cached(self, data_files: List[str], store_prefix: str) -> Dict[str, Any]:
+        normalized_store = self._resolve_store_for_filename(None, store_prefix)
         signature = self._build_files_signature(data_files)
         signature_key = self._signature_to_key(signature)
-        if signature in self._source_index_cache:
-            cached = self._source_index_cache[signature]
+        cache_key = (normalized_store, signature)
+        if cache_key in self._source_index_cache:
+            cached = self._source_index_cache[cache_key]
             print(
-                f"数据索引命中缓存 sku={len(cached['sku_to_source'])}, "
+                f"[{normalized_store}] 数据索引命中缓存 sku={len(cached['sku_to_source'])}, "
                 f"style={len(cached['style_to_source'])}"
             )
             return cached
-        sqlite_cached = self._load_source_index_from_sqlite(signature_key)
+        sqlite_cached = self._load_source_index_from_sqlite(signature_key, normalized_store)
         if sqlite_cached is not None:
-            self._source_index_cache[signature] = sqlite_cached
+            self._source_index_cache[cache_key] = sqlite_cached
             print(
-                f"数据索引命中 SQLite 缓存 sku={len(sqlite_cached['sku_to_source'])}, "
+                f"[{normalized_store}] 数据索引命中 SQLite 缓存 sku={len(sqlite_cached['sku_to_source'])}, "
                 f"style={len(sqlite_cached['style_to_source'])}"
             )
             return sqlite_cached
@@ -580,10 +710,74 @@ class ExcelProcessor:
             "source_file_by_sku": source_file_by_sku,
             "source_header_map_by_file": source_header_map_by_file,
         }
-        self._source_index_cache[signature] = index_data
-        self._save_source_index_to_sqlite(signature_key, index_data)
-        print(f"数据索引加载 sku={len(sku_to_source)}, style={len(style_to_source)}")
+        self._source_index_cache[cache_key] = index_data
+        self._save_source_index_to_sqlite(signature_key, index_data, normalized_store)
+        print(f"[{normalized_store}] 数据索引加载 sku={len(sku_to_source)}, style={len(style_to_source)}")
         return index_data
+
+    def _build_source_indexes_cached(self, data_files: List[str], context_store: Optional[str]) -> Dict[str, Dict[str, Any]]:
+        files_by_store = self._build_store_data_files(data_files, context_store)
+        has_explicit_store = any(
+            STORE_PREFIX_PATTERN.match(str(file_name).strip().upper())
+            for file_name in data_files
+        )
+        normalized_context_store = self._normalize_store_prefix(context_store)
+        if context_store is not None or has_explicit_store:
+            requested_store_set = {
+                self._resolve_store_for_filename(file_name, normalized_context_store)
+                for file_name in data_files
+            }
+            if not requested_store_set:
+                fallback_store = normalized_context_store
+                requested_store_set = {fallback_store}
+        else:
+            requested_store_set = set(STORE_PRIORITY)
+
+        indexes_by_store: Dict[str, Dict[str, Any]] = {}
+        for store_prefix in STORE_PRIORITY:
+            if store_prefix not in requested_store_set:
+                continue
+            store_files = files_by_store.get(store_prefix, [])
+            if not store_files:
+                continue
+            indexes_by_store[store_prefix] = self._build_source_index_cached(store_files, store_prefix)
+        return indexes_by_store
+
+    def _merge_source_indexes(
+        self,
+        indexes_by_store: Dict[str, Dict[str, Any]],
+        store_order: List[str],
+    ) -> Dict[str, Any]:
+        keys = [
+            "sku_to_source",
+            "sku_base_to_source",
+            "style_suffix_to_source",
+            "style_to_source",
+            "style_size_to_source",
+            "style_size_suffix_to_source",
+            "style_color_to_source",
+            "style_color_suffix_to_source",
+            "source_rows",
+            "source_file_by_sku",
+        ]
+        merged: Dict[str, Any] = {key: {} for key in keys}
+        merged["source_header_map_by_file"] = {}
+
+        for store_prefix in store_order:
+            index_data = indexes_by_store.get(store_prefix)
+            if not index_data:
+                continue
+            for key in keys:
+                dest = merged[key]
+                for data_key, value in index_data[key].items():
+                    if data_key not in dest:
+                        dest[data_key] = value
+            source_header_map = merged["source_header_map_by_file"]
+            for data_file, header_map in index_data["source_header_map_by_file"].items():
+                if data_file not in source_header_map:
+                    source_header_map[data_file] = header_map
+
+        return merged
 
     def parse_sku(self, sku: str) -> Optional[SKUInfo]:
         """解析 SKU 格式
@@ -943,7 +1137,7 @@ class ExcelProcessor:
         # 5. 保存输出文件
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_filename = f"processed_{timestamp}.xlsx"
-        output_path = UPLOADS_DIR / output_filename
+        output_path = RESULTS_DIR / output_filename
 
         wb_template.save(output_path)
         wb_template.close()
@@ -1056,32 +1250,9 @@ class ExcelProcessor:
                 )
             return replaced
 
-        def resolve_first_suffix_for_style(style_key: str, default_suffix: str) -> str:
-            upper_style = str(style_key).strip().upper()
-            for (candidate_style, _candidate_suffix), candidate_sku in style_suffix_to_source.items():
-                if candidate_style != upper_style:
-                    continue
-                parsed_candidate = self.parse_sku(candidate_sku)
-                if parsed_candidate and parsed_candidate.suffix:
-                    return parsed_candidate.suffix.upper()
-            style_sku = style_to_source.get(upper_style)
-            parsed_style = self.parse_sku(style_sku) if style_sku else None
-            if parsed_style and parsed_style.suffix:
-                return parsed_style.suffix.upper()
-            if default_suffix:
-                return str(default_suffix).upper()
-            return "-USA"
-
-        def normalize_variation_theme(value: Any, style_code: str, lookup_style_code: str, suffix: str) -> str:
-            text = str(value).strip() if value is not None else ""
-            upper_text = text.upper()
-            if upper_text == "SIZE_NAME/COLOR_NAME (DEPRECATED: DO NOT USE)":
-                return "SizeName-ColorName"
-            if upper_text == "SIZE/COLOR":
-                return "SizeColor"
-            if not text:
-                return f"{style_code}{resolve_first_suffix_for_style(lookup_style_code, suffix)}"
-            return text
+        def normalize_variation_theme(_value: Any) -> str:
+            """Variation Theme 统一按最新规则输出固定值。"""
+            return "SizeName-ColorName"
 
         field_aliases: Dict[str, List[str]] = {
             "key product features": ["Bullet Point", "Special Features", "Features"],
@@ -1161,9 +1332,15 @@ class ExcelProcessor:
         if not data_files:
             raise ValueError("缺少 Excel 数据文件")
         progress(f"数据文件: {data_files}")
+        template_store = self._guess_store_from_template_type(template_type)
+        sku_store_hint = self._guess_store_from_skus(generated_skus)
+        preferred_store = sku_store_hint or template_store
+        store_search_order = self._build_store_search_order(preferred_store)
+        progress(f"店铺索引查询顺序: {' -> '.join(store_search_order)}")
 
         # 价格映射（All Listings Report）
-        price_map = self._load_price_map_cached(price_report_file)
+        price_store = self._resolve_store_for_filename(price_report_file, preferred_store or "EP")
+        price_map = self._load_price_map_cached(price_report_file, price_store)
         asin_map = self._load_asin_map_cached(price_report_file)
         asin_map_by_base: Dict[str, str] = {}
         for asin_sku, asin_value in asin_map.items():
@@ -1286,7 +1463,14 @@ class ExcelProcessor:
         # 数据索引缓存
         progress("正在准备数据索引...")
         source_index_started_at = perf_counter()
-        source_index = self._build_source_index_cached(data_files)
+        indexes_by_store = self._build_source_indexes_cached(data_files, preferred_store)
+        available_store_order = [store for store in store_search_order if store in indexes_by_store]
+        if not available_store_order and indexes_by_store:
+            available_store_order = sorted(indexes_by_store.keys())
+        if not available_store_order:
+            raise ValueError("未找到可用店铺索引，请先上传 EP/DM/PZ 数据源文件")
+        source_index = self._merge_source_indexes(indexes_by_store, available_store_order)
+        progress(f"命中店铺索引: {', '.join(available_store_order)}")
         progress(f"数据索引准备耗时 {perf_counter() - source_index_started_at:.2f}s")
         sku_to_source: Dict[str, str] = source_index["sku_to_source"]
         sku_base_to_source: Dict[str, str] = source_index["sku_base_to_source"]
@@ -1373,26 +1557,54 @@ class ExcelProcessor:
             match_mode = "add-color"
         elif len(unique_colors) == 1 and len(unique_sizes) > 1:
             match_mode = "add-code"
-        effective_match_mode = (
+        requested_match_mode = (
             normalized_processing_mode
             if normalized_processing_mode in {"add-color", "add-code"}
-            else match_mode
+            else ""
         )
+        effective_match_mode = requested_match_mode if requested_match_mode else match_mode
+        if requested_match_mode == "add-color" and len(unique_colors) == 1 and len(unique_sizes) > 1:
+            # 单色多码若按 add-color 匹配，会按尺码跨色回退，导致品牌/文案串值。
+            effective_match_mode = "add-code"
+            progress("检测到单色多码，自动切换为 add-code 匹配，避免跨颜色串值")
+        elif requested_match_mode == "add-code" and len(unique_sizes) == 1 and len(unique_colors) > 1:
+            effective_match_mode = "add-color"
+            progress("检测到一码多色，自动切换为 add-color 匹配")
         progress(f"源匹配模式: {match_mode} (colors={len(unique_colors)}, sizes={len(unique_sizes)})")
-        if effective_match_mode != match_mode:
+        if requested_match_mode and effective_match_mode == requested_match_mode and effective_match_mode != match_mode:
             progress(f"按请求模式覆盖匹配策略: {effective_match_mode}")
+        elif requested_match_mode and effective_match_mode != requested_match_mode:
+            progress(f"请求模式 {requested_match_mode} 与 SKU 结构不一致，已改为 {effective_match_mode}")
+
+        base_suffix, plus_suffix = self._get_store_suffix_family(template_type)
 
         def suffix_candidates(suffix: str) -> List[str]:
-            suffix = (suffix or "").upper()
-            if suffix == "-USA":
-                return ["-USA", "-PH", ""]
-            if suffix == "-PH":
-                return ["-PH", "-USA", ""]
-            return ["-USA", "-PH", ""]
+            """返回当前店铺下可接受的后缀回退顺序。"""
+            normalized_suffix = (suffix or "").strip().upper()
+            if normalized_suffix and not normalized_suffix.startswith("-"):
+                normalized_suffix = f"-{normalized_suffix}"
+
+            if normalized_suffix == base_suffix:
+                candidates = [base_suffix, plus_suffix, ""]
+            elif normalized_suffix == plus_suffix:
+                candidates = [plus_suffix, base_suffix, ""]
+            elif normalized_suffix:
+                candidates = [normalized_suffix, base_suffix, plus_suffix, ""]
+            else:
+                candidates = [base_suffix, plus_suffix, ""]
+
+            ordered: List[str] = []
+            seen = set()
+            for candidate in candidates:
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                ordered.append(candidate)
+            return ordered
 
         # 无后缀请求展开规则：
-        # - 跟卖：展开为 -USA/-PH 两类（兼容双后缀业务）
-        # - 加色/加码：仅展开为 -USA，避免误生成 -PH
+        # - 跟卖：展开为当前店铺的标准/Plus 两类后缀
+        # - 加色/加码：仅展开为当前尺码对应的标准后缀，避免误生成其他族后缀
         expanded_skus: List[str] = []
         expanded_seen = set()
         for requested_sku in all_skus:
@@ -1402,9 +1614,10 @@ class ExcelProcessor:
             if req_info.suffix:
                 targets = [req_info.suffix]
             elif follow_sell_mode:
-                targets = ["-USA", "-PH"]
+                targets = [base_suffix, plus_suffix]
             else:
-                targets = ["-USA"]
+                generated_suffix = self._generate_suffix(template_type, target_size or req_info.size)
+                targets = [generated_suffix]
             for sfx in targets:
                 candidate = f"{req_info.product_code}{req_info.color_code}{req_info.size}{sfx}"
                 if candidate not in expanded_seen:
@@ -1439,7 +1652,7 @@ class ExcelProcessor:
                 allow_generic_fallback = True
 
                 if source_ref is None and effective_match_mode == "add-color":
-                    # 加色：前7位 + 后2位(size)，并兼容 -USA/-PH
+                    # 加色：前7位 + 后2位(size)，并兼容当前店铺后缀族
                     for sfx in suffix_candidates(info.suffix):
                         source_ref = style_size_suffix_to_source.get((source_style, info.size, sfx))
                         if source_ref:
@@ -1447,7 +1660,7 @@ class ExcelProcessor:
                     if source_ref is None:
                         source_ref = style_size_to_source.get((source_style, info.size))
                 elif source_ref is None and effective_match_mode == "add-code":
-                    # 加码：前9位(style+color)，并兼容 -USA/-PH
+                    # 加码：前9位(style+color)，并兼容当前店铺后缀族
                     for sfx in suffix_candidates(info.suffix):
                         source_ref = style_color_suffix_to_source.get((source_style, info.color_code, sfx))
                         if source_ref:
@@ -1470,8 +1683,8 @@ class ExcelProcessor:
             source_header_map = source_header_map_by_file.get(source_file, {})
             source_info = self.parse_sku(source_sku)
 
-            # 按源 SKU 后缀选择模板原型行：PH 用第4行，其他用第5行
-            prototype_row_idx = 4 if source_sku.endswith("-PH") else 5
+            # 按源 SKU 后缀选择模板原型行：Plus Body 用第4行，常规款用第5行
+            prototype_row_idx = 4 if self._is_plus_body_suffix(source_info.suffix if source_info else "") else 5
 
             # 先复制模板原型行（保证输出结构完整）
             prototype_values, prototype_styles, prototype_height = prototype_snapshots[prototype_row_idx]
@@ -1587,6 +1800,60 @@ class ExcelProcessor:
             name_cell = output_ws.cell(row=output_row_idx, column=product_name_col)
             if name_cell.value:
                 name_cell.value = replace_us_size_token(str(name_cell.value), info.size)
+
+            # Outer Material Type：仅填充第一列，后续重复列保持空白
+            outer_material_cols = output_header_map.get("outer material type", [])
+            if outer_material_cols:
+                material_candidates = [
+                    [f"material{i}", f"material {i}"]
+                    for i in range(1, 6)
+                ]
+                first_outer_material_col = outer_material_cols[0]
+                first_material_candidates = material_candidates[0]
+                material_value = read_source_value(
+                    source_header_map,
+                    source_row_values,
+                    first_material_candidates,
+                )
+                output_ws.cell(row=output_row_idx, column=first_outer_material_col).value = (
+                    material_value if material_value is not None else None
+                )
+                for out_col in outer_material_cols[1:]:
+                    output_ws.cell(row=output_row_idx, column=out_col).value = None
+
+            # 修复 1：统一 Material 字段权威值。
+            # 所有店铺模板统一优先取源表 Fabric Type，其次回退到第一个非空的 Material1~5，
+            # 再同步覆盖 Fabric Type / Outer Material Type，避免模板默认值或重复映射导致两者不一致。
+            material_authority_value = read_source_value(
+                source_header_map,
+                source_row_values,
+                [
+                    "Fabric Type",
+                    "Material1",
+                    "Material 1",
+                    "Material2",
+                    "Material 2",
+                    "Material3",
+                    "Material 3",
+                    "Material4",
+                    "Material 4",
+                    "Material5",
+                    "Material 5",
+                ],
+            )
+            if material_authority_value is not None:
+                fabric_type_cols = output_header_map.get("fabric type", [])
+                authority_target_cols = [*fabric_type_cols]
+                if outer_material_cols:
+                    authority_target_cols.append(outer_material_cols[0])
+                for col in dict.fromkeys(authority_target_cols):
+                    output_ws.cell(row=output_row_idx, column=col).value = material_authority_value
+
+            # 修复 2：Item Length 保持空白，不影响 Item Length Description 的正常来源值。
+            item_length_cols = output_header_map.get("item length", [])
+            if item_length_cols:
+                for col in item_length_cols:
+                    output_ws.cell(row=output_row_idx, column=col).value = None
 
             # 覆盖 Your Price：优先价格报告，缺失时回退源表价格列
             your_price_cols = output_header_map.get("your price", [])
@@ -1706,9 +1973,7 @@ class ExcelProcessor:
             # 统一计算最终颜色/尺码（支持同时加色+加码）
             final_color_code = target_color if target_color else info.color_code
             final_size = target_size if target_size else info.size
-            final_suffix = info.suffix if info.suffix else (source_info.suffix if source_info else "")
-            if not final_suffix:
-                final_suffix = "-USA"
+            final_suffix = info.suffix if info.suffix else self._generate_suffix(template_type, final_size)
             final_suffix = final_suffix.upper()
             final_sku = f"{info.product_code}{final_color_code}{final_size}{final_suffix}"
             parent_sku = f"{info.product_code}{final_suffix}"
@@ -1787,7 +2052,7 @@ class ExcelProcessor:
                 needs_image_fill = color_changed or not current_main_image_url
                 if needs_image_fill and not clear_image_urls:
                     # 图片规则按“目标 Seller SKU 后缀”判定，不能用源行后缀。
-                    is_ph_suffix = (final_suffix == "-PH")
+                    is_ph_suffix = self._is_plus_body_suffix(final_suffix)
                     image_variant = TEMPLATES[template_type]["image_variant"]
                     size_chart_url = "https://eppic.s3.amazonaws.com/MH00000-S2.jpg"
 
@@ -1878,20 +2143,14 @@ class ExcelProcessor:
             output_ws.cell(row=output_row_idx, column=style_number_col).value = final_sku
             output_ws.cell(row=output_row_idx, column=manufacturer_part_number_col).value = final_sku
             parent_sku_cols = output_header_map.get("parent sku", [])
-            source_parent_sku = read_source_value(
-                source_header_map,
-                source_row_values,
-                ["parent sku"],
-            )
-            parent_sku_to_write = source_parent_sku if source_parent_sku else parent_sku
             for col in parent_sku_cols:
-                output_ws.cell(row=output_row_idx, column=col).value = parent_sku_to_write
+                output_ws.cell(row=output_row_idx, column=col).value = parent_sku
 
             # Variation Theme 规范化
             variation_theme_cols = output_header_map.get("variation theme", [])
             for col in variation_theme_cols:
                 cell = output_ws.cell(row=output_row_idx, column=col)
-                cell.value = normalize_variation_theme(cell.value, info.product_code, source_style, final_suffix)
+                cell.value = normalize_variation_theme(cell.value)
 
             # 产品名：颜色与尺码同步到最终值
             name_cell = output_ws.cell(row=output_row_idx, column=product_name_col)
@@ -1960,7 +2219,7 @@ class ExcelProcessor:
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_filename = f"processed_{timestamp}.xlsx"
-        output_path = UPLOADS_DIR / output_filename
+        output_path = RESULTS_DIR / output_filename
 
         progress("正在保存输出文件...")
         save_started_at = perf_counter()

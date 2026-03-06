@@ -93,10 +93,10 @@ export const excelApi = {
   },
 
   // 跟卖 SKC 查询尺码
-  queryFollowSellSkc: async (skc: string): Promise<SKCQueryResponse> => {
+  queryFollowSellSkc: async (skc: string, templateType = 'EPUS'): Promise<SKCQueryResponse> => {
     const { data } = await apiClient.post<SKCQueryResponse>(
       '/api/follow-sell/query-skc',
-      { skc }
+      { skc, template_type: templateType }
     );
     return data;
   },

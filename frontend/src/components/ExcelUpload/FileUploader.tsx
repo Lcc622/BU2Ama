@@ -8,13 +8,17 @@ import { useUploadStore } from '../../store/useUploadStore';
 import type { AnalysisResult } from '../../types/api';
 import toast from 'react-hot-toast';
 
-const ALLOWED_FIXED_FILES = new Set(['EP-0.xlsm', 'EP-1.xlsm', 'EP-2.xlsm']);
+const STORE_PREFIXES = ['EP', 'DM', 'DA', 'PZ'] as const;
+const ALLOWED_FIXED_FILES = new Set(
+  STORE_PREFIXES.flatMap((prefix) => [`${prefix}-0.xlsm`, `${prefix}-1.xlsm`, `${prefix}-2.xlsm`])
+);
+const UPLOAD_FILE_HINT = '支持文件名：{EP|DM|DA|PZ}-0/1/2.xlsm、{EP|DM|DA|PZ}-All+Listings+Report.txt';
 
 const isAllowedUploadFilename = (filename: string): boolean => {
   const trimmed = String(filename || '').trim();
   if (!trimmed) return false;
   if (ALLOWED_FIXED_FILES.has(trimmed)) return true;
-  return /^EP-All\+Listings\+Report\.txt$/i.test(trimmed);
+  return /^(EP|DM|DA|PZ)-All\+Listings\+Report\.txt$/i.test(trimmed);
 };
 
 export function FileUploader() {
@@ -41,7 +45,7 @@ export function FileUploader() {
           });
           toast.success(`已加载 ${existingFiles.length} 个数据文件`);
         } else {
-          toast.error('未找到固定数据文件，请先上传 EP-0/EP-1/EP-2 和价格报告');
+          toast.error(`未找到固定数据文件，请先上传：${UPLOAD_FILE_HINT}`);
         }
       } catch (err) {
         console.error('加载服务器文件失败:', err);
@@ -92,7 +96,7 @@ export function FileUploader() {
     if (allowedFiles.length > 0) {
       uploadMutation.mutate(allowedFiles);
     } else {
-      toast.error('仅支持上传 EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt');
+      toast.error(`仅支持上传：${UPLOAD_FILE_HINT}`);
     }
   }, [uploadMutation]);
 
@@ -104,7 +108,7 @@ export function FileUploader() {
         if (selectedFiles.length > 0) {
           uploadMutation.mutate(selectedFiles);
         } else {
-          toast.error('仅支持上传 EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt');
+          toast.error(`仅支持上传：${UPLOAD_FILE_HINT}`);
         }
       }
       // 清空 input 以允许重复上传同一文件
@@ -175,7 +179,7 @@ export function FileUploader() {
           </div>
 
           <div className="text-xs text-slate-500">
-            仅支持固定文件名：EP-0.xlsm、EP-1.xlsm、EP-2.xlsm、EP-All+Listings+Report.txt
+            {UPLOAD_FILE_HINT}
           </div>
         </label>
       </div>
