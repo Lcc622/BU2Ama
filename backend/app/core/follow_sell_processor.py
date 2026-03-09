@@ -53,6 +53,14 @@ class FollowSellProcessor:
             return "EP"
         return "EP"
 
+    def get_template_type(self, store_prefix: Optional[str]) -> str:
+        normalized = self._normalize_store_prefix(store_prefix)
+        if normalized == "DM":
+            return "DaMaUS"
+        if normalized == "PZ":
+            return "PZUS"
+        return "EPUS"
+
     def get_index_db_path(self, store_prefix: str) -> Path:
         normalized = self._normalize_store_prefix(store_prefix)
         return UPLOADS_DIR / f"ep_index_{normalized}.db"
@@ -440,6 +448,52 @@ class FollowSellProcessor:
             print(f"按需加载 SKU 行失败 {target_sku}: {e}")
 
         return None
+
+    def _find_source_files(self, store_prefix: str, old_style: str, color_code: str) -> List[str]:
+        normalized_store = self._normalize_store_prefix(store_prefix)
+        self._ensure_store_index(normalized_store)
+        conn = self._connect_db(normalized_store)
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT source_file
+                FROM ep_sku_index
+                WHERE store_prefix = ?
+                  AND style = ?
+                  AND substr(sku, 8, 2) = ?
+                ORDER BY source_file
+                """,
+                (normalized_store, old_style, color_code),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row[0]) for row in rows if row and row[0]]
+
+    def process_skc(self, skc: str, store_prefix: str = "EP") -> Dict[str, Any]:
+        template_type = self.get_template_type(store_prefix)
+        query_result = self.find_sizes_for_skc(skc=skc, template_type=template_type)
+
+        result: Dict[str, Any] = {
+            "success": bool(query_result.get("success")),
+            "skc": str(query_result.get("skc", skc)).strip().upper(),
+            "old_style": str(query_result.get("old_style", "")).strip().upper(),
+            "sizes": [
+                str(item.get("size", "")).strip()
+                for item in query_result.get("sizes", [])
+                if str(item.get("size", "")).strip()
+            ],
+            "source_files": [],
+            "message": str(query_result.get("message", "")).strip(),
+        }
+
+        if result["success"] and result["old_style"]:
+            result["source_files"] = self._find_source_files(
+                store_prefix=store_prefix,
+                old_style=result["old_style"],
+                color_code=str(query_result.get("color_code", "")).strip().upper(),
+            )
+
+        return result
 
 
 # 全局单例
