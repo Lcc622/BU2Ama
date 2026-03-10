@@ -19,6 +19,7 @@ class FollowSellProcessor:
     def __init__(self):
         self.new_to_old_mapping: Dict[str, str] = {}
         self._last_parse_error = ""
+        self._source_field_cache: Dict[Tuple[str, str, Tuple[str, ...]], Optional[str]] = {}
         legacy_db_path = UPLOADS_DIR / "ep_index.db"
         if legacy_db_path.exists():
             print("警告: 检测到旧索引库 ep_index.db，请重新上传店铺数据源以重建 EP/DM/PZ 分店铺索引。")
@@ -298,6 +299,76 @@ class FollowSellProcessor:
             return "-DAPH" if is_plus else "-DA"
         return "-PH" if is_plus else "-USA"
 
+    def _extract_suffix_from_parent_sku(self, parent_sku: Optional[str]) -> str:
+        """Extract and normalize suffix from a source parent SKU value."""
+        text = str(parent_sku or "").strip().upper()
+        if len(text) <= 7:
+            return ""
+        return self._normalize_suffix(text[7:])
+
+    def _read_source_row_field(
+        self,
+        source_file: str,
+        target_sku: str,
+        field_names: List[str],
+    ) -> Optional[str]:
+        """Read a field value from a source workbook row identified by SKU."""
+        cache_key = (
+            str(source_file).strip(),
+            str(target_sku).strip().upper(),
+            tuple(str(name).strip().lower() for name in field_names),
+        )
+        if cache_key in self._source_field_cache:
+            return self._source_field_cache[cache_key]
+
+        file_path = UPLOADS_DIR / source_file
+        if not file_path.exists():
+            self._source_field_cache[cache_key] = None
+            return None
+
+        result: Optional[str] = None
+        try:
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb['Template'] if 'Template' in wb.sheetnames else wb.active
+
+            header_sku_col = 3 if str(ws.cell(row=4, column=3).value or '').strip().upper() == 'SKU' else 2
+            header_map: Dict[str, List[int]] = {}
+            for col_idx in range(1, ws.max_column + 1):
+                for header_row in (4, 5):
+                    value = ws.cell(row=header_row, column=col_idx).value
+                    if not value:
+                        continue
+                    key = str(value).strip().lower()
+                    if not key:
+                        continue
+                    header_map.setdefault(key, []).append(col_idx)
+
+            normalized_target = str(target_sku).strip().upper()
+            normalized_candidates = [str(name).strip().lower() for name in field_names if str(name).strip()]
+            for row in ws.iter_rows(min_row=7, values_only=True):
+                if len(row) < header_sku_col:
+                    continue
+                sku_value = row[header_sku_col - 1]
+                if str(sku_value or "").strip().upper() != normalized_target:
+                    continue
+                for field_name in normalized_candidates:
+                    for col_idx in header_map.get(field_name, []):
+                        if 0 < col_idx <= len(row):
+                            value = row[col_idx - 1]
+                            if value is not None and str(value).strip():
+                                result = str(value).strip()
+                                break
+                    if result is not None:
+                        break
+                break
+            wb.close()
+        except Exception as exc:
+            print(f"读取源字段失败 {source_file} {target_sku}: {exc}")
+            result = None
+
+        self._source_field_cache[cache_key] = result
+        return result
+
     def find_sizes_for_skc(self, skc: str, template_type: str = "EPUS") -> Dict:
         """根据 SKC 查找所有尺码信息
 
@@ -347,17 +418,17 @@ class FollowSellProcessor:
 
         result['old_style'] = old_style
 
-        # 3. 在店铺 SQLite 索引中查找老款号“同颜色”的所有尺码
+        # 3. 在店铺 SQLite 索引中查找老款号“同颜色”的所有尺码与源 SKU
         conn = self._connect_db(store_prefix)
         try:
             rows = conn.execute(
                 """
-                SELECT DISTINCT size
+                SELECT sku, size, suffix, source_file
                 FROM ep_sku_index
                 WHERE store_prefix = ?
                   AND style = ?
                   AND substr(sku, 8, 2) = ?
-                ORDER BY size
+                ORDER BY CAST(size AS INTEGER), sku
                 """,
                 (store_prefix, old_style, color_code)
             ).fetchall()
@@ -373,9 +444,20 @@ class FollowSellProcessor:
         # 5. 构建结果
         normalized_items: List[Dict[str, str]] = []
         seen = set()
-        for (size,) in rows:
+        for source_sku, size, suffix, source_file in rows:
             size_str = str(size)
-            suffix_str = self._generate_suffix_for_store(store_prefix, size_str)
+            suffix_str = self._normalize_suffix(str(suffix or ""))
+            if not str(suffix or "").strip():
+                parent_sku = self._read_source_row_field(
+                    source_file=str(source_file),
+                    target_sku=str(source_sku),
+                    field_names=[
+                        "Parent SKU",
+                        "child_parent_sku_relationship[marketplace_id=ATVPDKIKX0DER]#1.parent_sku",
+                    ],
+                )
+                suffix_from_parent = self._extract_suffix_from_parent_sku(parent_sku)
+                suffix_str = suffix_from_parent or self._generate_suffix_for_store(store_prefix, size_str)
             key = (size_str, suffix_str)
             if key in seen:
                 continue

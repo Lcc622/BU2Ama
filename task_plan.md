@@ -56,3 +56,21 @@ Phase 6
 | Error | Attempt | Resolution |
 |-------|---------|------------|
 | `ModuleNotFoundError: app`（冒烟脚本） | 1 | 增加 `PYTHONPATH=backend` 后通过 |
+
+## 2026-03-09 CLI Task
+- [x] Inspect current CLI style, processor interfaces, and upload/index behavior
+- [x] Add shared CLI helpers and missing `FollowSellProcessor.process_skc()`
+- [x] Implement `add_color_size.py`, `follow_sell.py`, and `upload_source.py`
+- [x] Run CLI tests and capture JSON/exit code behavior
+
+## 2026-03-09 Skill Packaging Task
+- [x] Audit the stage-3 draft against the real CLI behavior
+- [x] Create versioned skill source under `skills/bu2ama-listing-ops/`
+- [x] Add wrapper scripts that dispatch to `backend/app/cli/*.py`
+- [x] Write references for store rules, file contracts, troubleshooting, and Telegram flow
+- [x] Install the skill into `~/.claude/skills/`
+
+## 2026-03-09 Telegram Follow-Sell Alignment Task
+- [x] Align CLI follow-sell query output with web UI detail columns
+- [x] Add Excel export support to follow-sell CLI for Telegram/OpenClaw use
+- [x] Update skill docs and examples for detailed query + export flow
