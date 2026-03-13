@@ -1648,8 +1648,22 @@ class ExcelProcessor:
                 ]
                 targets = dual_suffix_targets or [self._generate_suffix(template_type, target_size or req_info.size)]
             else:
-                generated_suffix = self._generate_suffix(template_type, target_size or req_info.size)
-                targets = [generated_suffix]
+                source_style = normalized_source_style_map.get(req_info.product_code, req_info.product_code)
+                effective_size = target_size or req_info.size
+                has_base_suffix = bool(
+                    style_size_suffix_to_source.get((source_style, effective_size, base_suffix))
+                )
+                has_plus_suffix = bool(
+                    style_size_suffix_to_source.get((source_style, effective_size, plus_suffix))
+                )
+                if has_base_suffix and not has_plus_suffix:
+                    targets = [base_suffix]
+                elif has_plus_suffix and not has_base_suffix:
+                    targets = [plus_suffix]
+                elif has_base_suffix and has_plus_suffix:
+                    targets = [base_suffix, plus_suffix]
+                else:
+                    targets = [self._generate_suffix(template_type, effective_size)]
             for sfx in targets:
                 candidate = f"{req_info.product_code}{req_info.color_code}{req_info.size}{sfx}"
                 if candidate not in expanded_seen:
@@ -1659,6 +1673,7 @@ class ExcelProcessor:
         processed_count = 0
         output_row_idx = 4
         add_color_display_source_refs: Dict[Tuple[str, str], str] = {}
+        follow_sell_canonical_refs: Dict[Tuple[str, str], str] = {}
         add_color_display_price_cache: Dict[str, float] = {}
 
         process_rows_started_at = perf_counter()
@@ -1715,6 +1730,15 @@ class ExcelProcessor:
             source_row_values = source_rows.get(source_sku, [])
             source_file = source_file_by_sku.get(source_sku, "")
             source_header_map = source_header_map_by_file.get(source_file, {})
+            if follow_sell_mode:
+                canonical_key = (source_style, info.color_code)
+                canonical_sku = follow_sell_canonical_refs.setdefault(canonical_key, source_sku)
+                canonical_row_values = source_rows.get(canonical_sku, source_row_values)
+                canonical_file = source_file_by_sku.get(canonical_sku, source_file)
+                canonical_header_map = source_header_map_by_file.get(canonical_file, source_header_map)
+            else:
+                canonical_row_values = source_row_values
+                canonical_header_map = source_header_map
             source_info = self.parse_sku(source_sku)
             use_canonical_add_color_display = (
                 not follow_sell_mode and normalized_processing_mode == "add-color"
@@ -1777,8 +1801,8 @@ class ExcelProcessor:
                     # 替换/颜色尺码变更：从输入表字段取值
                     if ("替换" in logic or "颜色/尺码变更" in logic) and in_field and in_field not in ("非映射", "-"):
                         value = read_source_value(
-                            source_header_map,
-                            source_row_values,
+                            canonical_header_map,
+                            canonical_row_values,
                             [in_field],
                             in_field_used,
                         )
@@ -2163,12 +2187,12 @@ class ExcelProcessor:
                             f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}105.jpg",
                         ]
                     else:
-                        main_image_url = f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}10.jpg"
+                        main_image_url = f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}1.jpg"
                         other_image_urls = [
-                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}20.jpg",
-                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}30.jpg",
-                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}40.jpg",
-                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}50.jpg",
+                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}2.jpg",
+                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}3.jpg",
+                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}4.jpg",
+                            f"https://eppic.s3.amazonaws.com/{info_for_image.product_code}{final_color_code}-{image_variant}5.jpg",
                         ]
 
                     output_ws.cell(row=output_row_idx, column=main_image_col).value = main_image_url
@@ -2212,6 +2236,7 @@ class ExcelProcessor:
             preserve_source_color = (
                 normalized_variation_theme == "SizeColor"
                 and not force_size_name_color_theme
+                and not color_changed
             )
 
             source_color_value = None
