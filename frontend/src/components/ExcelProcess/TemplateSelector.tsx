@@ -1,6 +1,7 @@
 /**
  * 模板选择组件
  */
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { excelApi } from '../../services/excelApi';
 import { useProcessStore } from '../../store/useProcessStore';
@@ -13,6 +14,24 @@ export function TemplateSelector() {
     queryKey: ['templates'],
     queryFn: excelApi.getTemplates,
   });
+
+  useEffect(() => {
+    const availableTemplates = templates?.filter((template) => template.exists) ?? [];
+    if (availableTemplates.length === 0) {
+      return;
+    }
+
+    const hasSelectedTemplate = availableTemplates.some(
+      (template) => template.name === templateType
+    );
+
+    if (!hasSelectedTemplate) {
+      const firstTemplate = availableTemplates[0]?.name;
+      if (firstTemplate === 'DaMaUS' || firstTemplate === 'EPUS' || firstTemplate === 'PZUS') {
+        setTemplateType(firstTemplate);
+      }
+    }
+  }, [templates, templateType, setTemplateType]);
 
   if (isLoading) {
     return <div className="text-sm text-gray-600">加载模板...</div>;

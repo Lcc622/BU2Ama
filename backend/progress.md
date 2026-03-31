@@ -1,11 +1,9 @@
 # Progress
 
-- Inspected `app/core/excel_processor.py` and request wiring in `app/api/excel.py`.
-- Ran the fixed generation flow with:
-  - template: `DaMaUS`
-  - source files: `DA-0.xlsm`, `DM-All+Listings+Report.txt`
-  - prefixes: `ES01819`
-  - generated SKUs: `ES01819NT14/16/18/20/22/24/26`
-  - mode: `add-color`
-- The processor auto-switched matching to `add-code` for the single-color multi-size request and generated `results/processed_20260306_131248.xlsx` with 7 processed rows.
-- Compared target rows in the new workbook against `results/processed_20260305_091424.xlsx` and verified the requested field-level changes.
+- Read `using-superpowers` and `planning-with-files` skill instructions and switched to file-based planning for this task.
+- Inspected `backend/app/api/excel.py`, `backend/app/config.py`, `backend/app/models/excel.py`, `backend/app/core/excel_processor.py`, and `backend/tests/test_export_regressions.py`.
+- Confirmed validation should be attached to follow-sell single export (`/follow-sell/process-skc`) and batch export (`/follow-sell/process-skc-batch`) responses after the workbook file is renamed into `RESULTS_DIR`.
+- Confirmed workbook conventions needed by the validator:
+  - headers live on rows 2 and 3
+  - output rows begin at row 4
+  - mapping completeness checks should also consider row 5 to cover row-shifted templates

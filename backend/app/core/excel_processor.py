@@ -8,7 +8,7 @@ import sqlite3
 from copy import copy
 from time import perf_counter
 from threading import Lock
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -17,7 +17,7 @@ from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.utils import get_column_letter
 
-from app.config import UPLOADS_DIR, RESULTS_DIR, TEMPLATES
+from app.config import ADD_COLOR_TEMPLATE_FILE, ALLOWED_STORE_PREFIXES, RESULTS_DIR, TEMPLATES, UPLOADS_DIR
 from app.core.color_mapper import color_mapper
 from app.models.excel import SKUInfo, ColorDistribution, AnalysisResult
 
@@ -124,14 +124,25 @@ class ExcelProcessor:
                 return self._normalize_store_prefix(match.group(1))
         return None
 
+    def _get_allowed_store_prefixes(self) -> List[str]:
+        return [store for store in STORE_PRIORITY if store in ALLOWED_STORE_PREFIXES]
+
+    def _require_allowed_store(self, store_prefix: Optional[str]) -> str:
+        normalized = self._normalize_store_prefix(store_prefix)
+        allowed = self._get_allowed_store_prefixes()
+        if normalized not in allowed:
+            raise ValueError(f"当前实例不允许访问店铺 {normalized}，允许店铺: {', '.join(allowed)}")
+        return normalized
+
     def _build_store_search_order(self, preferred_store: Optional[str]) -> List[str]:
-        normalized = self._normalize_store_prefix(preferred_store)
-        if normalized in STORE_PRIORITY:
-            return [normalized] + [store for store in STORE_PRIORITY if store != normalized]
-        return list(STORE_PRIORITY)
+        allowed = self._get_allowed_store_prefixes()
+        if preferred_store is None:
+            return allowed
+        normalized = self._require_allowed_store(preferred_store)
+        return [normalized] + [store for store in allowed if store != normalized]
 
     def _scan_store_data_files(self) -> Dict[str, List[str]]:
-        files_by_store: Dict[str, List[str]] = {store: [] for store in STORE_PRIORITY}
+        files_by_store: Dict[str, List[str]] = {store: [] for store in self._get_allowed_store_prefixes()}
         for path in sorted(UPLOADS_DIR.iterdir()):
             if not path.is_file():
                 continue
@@ -142,7 +153,8 @@ class ExcelProcessor:
             if not STORE_SOURCE_FILE_PATTERN.match(path.name.strip().upper()):
                 continue
             store_prefix = self.get_store_prefix(path.name)
-            files_by_store[store_prefix].append(path.name)
+            if store_prefix in files_by_store:
+                files_by_store[store_prefix].append(path.name)
         return files_by_store
 
     def _build_store_data_files(
@@ -150,10 +162,15 @@ class ExcelProcessor:
         request_data_files: List[str],
         context_store: Optional[str],
     ) -> Dict[str, List[str]]:
+        allowed_store_set = set(self._get_allowed_store_prefixes())
         scanned_files = self._scan_store_data_files()
-        normalized_context = self._normalize_store_prefix(context_store)
+        normalized_context = None
+        if context_store is not None:
+            normalized_context = self._require_allowed_store(context_store)
         for file_name in request_data_files:
             store_prefix = self._resolve_store_for_filename(file_name, normalized_context)
+            if store_prefix not in allowed_store_set:
+                raise ValueError(f"当前实例不允许访问店铺数据文件: {file_name}")
             if file_name not in scanned_files[store_prefix]:
                 scanned_files[store_prefix].append(file_name)
         return {
@@ -327,7 +344,7 @@ class ExcelProcessor:
             file_key = str(data_file)
             if file_key not in source_header_map_by_file:
                 source_header_map_by_file[file_key] = {}
-            header_key = str(header_norm)
+            header_key = self._normalize_header(header_norm)
             source_header_map_by_file[file_key].setdefault(header_key, []).append(int(col_idx))
 
         return {
@@ -405,7 +422,8 @@ class ExcelProcessor:
             conn.close()
 
     def _normalize_header(self, value: str) -> str:
-        return str(value).strip().lower()
+        text = str(value).strip().lower()
+        return re.sub(r"[_\-\s]+", "_", text)
 
     def _detect_effective_max_col(self, ws: Worksheet, header_rows: List[int], hard_cap: Optional[int] = None) -> int:
         max_col = ws.max_column
@@ -496,7 +514,7 @@ class ExcelProcessor:
 
     def prewarm_template_cache(self, template_files: Optional[List[str]] = None) -> Dict[str, str]:
         """预热模板缓存，让首次处理也能命中内存缓存。"""
-        files = template_files or [cfg["template_file"] for cfg in TEMPLATES.values()]
+        files = template_files or [cfg["template_file"] for cfg in TEMPLATES.values()] + [ADD_COLOR_TEMPLATE_FILE]
         results: Dict[str, str] = {}
         for template_file in files:
             template_path = UPLOADS_DIR / template_file
@@ -561,13 +579,28 @@ class ExcelProcessor:
         asin_map: Dict[str, str] = {}
         price_path = UPLOADS_DIR / price_report_file
         if price_path.exists():
-            for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+            for encoding in ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
                 try:
                     with open(price_path, 'r', encoding=encoding) as f:
                         reader = csv.DictReader(f, delimiter='\t')
                         for row in reader:
-                            sku = str(row.get('seller-sku', '')).strip().upper()
-                            asin = str(row.get('asin1', '')).strip().upper()
+                            normalized_row = {
+                                self._normalize_header(str(key).replace('\ufeff', '')): value
+                                for key, value in row.items()
+                                if key is not None
+                            }
+
+                            def get_first_value(candidates: List[str]) -> str:
+                                for candidate in candidates:
+                                    value = normalized_row.get(self._normalize_header(candidate))
+                                    if value is not None and str(value).strip() != "":
+                                        return str(value).strip()
+                                return ""
+
+                            sku = get_first_value(["seller-sku", "seller sku", "sku"]).upper()
+                            asin = get_first_value(
+                                ["asin1", "asin", "product-id", "product id", "external product id"]
+                            ).upper()
                             if not sku or not asin:
                                 continue
                             asin_map[sku] = asin
@@ -716,25 +749,36 @@ class ExcelProcessor:
         return index_data
 
     def _build_source_indexes_cached(self, data_files: List[str], context_store: Optional[str]) -> Dict[str, Dict[str, Any]]:
+        allowed_store_order = self._get_allowed_store_prefixes()
+        allowed_store_set = set(allowed_store_order)
         files_by_store = self._build_store_data_files(data_files, context_store)
         has_explicit_store = any(
             STORE_PREFIX_PATTERN.match(str(file_name).strip().upper())
             for file_name in data_files
         )
-        normalized_context_store = self._normalize_store_prefix(context_store)
+        normalized_context_store = self._require_allowed_store(context_store) if context_store is not None else None
         if context_store is not None or has_explicit_store:
             requested_store_set = {
                 self._resolve_store_for_filename(file_name, normalized_context_store)
                 for file_name in data_files
             }
             if not requested_store_set:
-                fallback_store = normalized_context_store
-                requested_store_set = {fallback_store}
+                if normalized_context_store is None:
+                    return {}
+                requested_store_set = {normalized_context_store}
         else:
-            requested_store_set = set(STORE_PRIORITY)
+            requested_store_set = allowed_store_set
+
+        disallowed_store_set = requested_store_set - allowed_store_set
+        if disallowed_store_set:
+            raise ValueError(
+                f"当前实例不允许访问店铺: {', '.join(sorted(disallowed_store_set))}"
+            )
 
         indexes_by_store: Dict[str, Dict[str, Any]] = {}
         for store_prefix in STORE_PRIORITY:
+            if store_prefix not in allowed_store_set:
+                continue
             if store_prefix not in requested_store_set:
                 continue
             store_files = files_by_store.get(store_prefix, [])
@@ -819,6 +863,52 @@ class ExcelProcessor:
         """从 SKU 中提取颜色代码"""
         info = self.parse_sku(sku)
         return info.color_code if info else None
+
+    def _source_matches_style_color(
+        self,
+        source_sku: Optional[str],
+        expected_style: str,
+        expected_color: str,
+    ) -> bool:
+        if not source_sku:
+            return False
+        parsed = self.parse_sku(source_sku)
+        return bool(
+            parsed
+            and parsed.product_code == expected_style
+            and parsed.color_code == expected_color
+        )
+
+    def _resolve_add_code_source_ref(
+        self,
+        requested_sku: str,
+        info: SKUInfo,
+        source_style: str,
+        sku_to_source: Dict[str, str],
+        sku_base_to_source: Dict[str, str],
+        style_color_suffix_to_source: Dict[Tuple[str, str, str], str],
+        style_color_to_source: Dict[Tuple[str, str], str],
+        suffixes: List[str],
+    ) -> Optional[str]:
+        # add-code 必须严格锁定同款同色，禁止任何跨色 fallback。
+        direct_candidates: List[Optional[str]] = [sku_to_source.get(requested_sku)]
+        if len(requested_sku) >= 11:
+            direct_candidates.append(sku_base_to_source.get(requested_sku[:11]))
+
+        for candidate in direct_candidates:
+            if self._source_matches_style_color(candidate, source_style, info.color_code):
+                return candidate
+
+        for suffix in suffixes:
+            candidate = style_color_suffix_to_source.get((source_style, info.color_code, suffix))
+            if self._source_matches_style_color(candidate, source_style, info.color_code):
+                return candidate
+
+        candidate = style_color_to_source.get((source_style, info.color_code))
+        if self._source_matches_style_color(candidate, source_style, info.color_code):
+            return candidate
+
+        return None
 
     def read_skus_from_txt(self, filename: str) -> List[str]:
         """从 .txt 文件中读取 SKU 列表
@@ -978,26 +1068,30 @@ class ExcelProcessor:
         """获取颜色分类"""
         color_lower = color_name.lower()
 
+        # Multicolor 关键词优先匹配（floral/print/pattern 意味着多色，覆盖单色分类）
+        multicolor_keywords = ['multicolor', 'multi', 'floral', 'print', 'pattern', 'tie dye', 'tie-dye', 'rainbow']
+        if any(keyword in color_lower for keyword in multicolor_keywords):
+            return 'Multicoloured'
+
         color_categories = {
-            'Purple': ['purple', 'violet', 'lavender', 'plum'],
-            'Blue': ['blue', 'navy', 'azure', 'cyan', 'teal'],
-            'Green': ['green', 'olive', 'lime', 'mint'],
-            'Red': ['red', 'crimson', 'burgundy', 'wine'],
-            'Pink': ['pink', 'rose', 'coral', 'fuchsia'],
-            'Orange': ['orange', 'peach', 'apricot'],
-            'Yellow': ['yellow', 'gold', 'cream', 'beige'],
-            'Brown': ['brown', 'tan', 'khaki', 'coffee', 'chocolate'],
+            'Purple': ['purple', 'violet', 'lavender', 'plum', 'lilac', 'mauve', 'periwinkle', 'orchid', 'wisteria', 'amethyst'],
+            'Blue': ['blue', 'navy', 'azure', 'cyan', 'teal', 'cobalt', 'indigo', 'denim', 'sky', 'powder'],
+            'Green': ['green', 'olive', 'lime', 'mint', 'sage', 'emerald', 'forest', 'hunter', 'army', 'moss', 'seafoam'],
+            'Red': ['red', 'crimson', 'burgundy', 'wine', 'maroon', 'rust', 'cherry', 'scarlet', 'garnet', 'ruby'],
+            'Pink': ['pink', 'rose', 'coral', 'fuchsia', 'blush', 'magenta', 'salmon'],
+            'Orange': ['orange', 'peach', 'apricot', 'amber', 'terracotta', 'pumpkin', 'copper', 'sienna'],
             'Black': ['black'],
-            'White': ['white', 'ivory'],
-            'Grey': ['grey', 'gray', 'silver'],
-            'Multicolor': ['multicolor', 'multi', 'print', 'pattern']
+            'Yellow': ['yellow', 'gold', 'cream', 'beige', 'lemon', 'mustard', 'golden', 'butter', 'champagne'],
+            'Brown': ['brown', 'tan', 'khaki', 'coffee', 'chocolate', 'caramel', 'mocha', 'latte', 'taupe', 'camel', 'walnut'],
+            'White': ['white', 'ivory', 'snow', 'pearl', 'off-white', 'off white', 'eggshell', 'ecru', 'lace'],
+            'Grey': ['grey', 'gray', 'silver', 'charcoal', 'slate', 'ash', 'smoke', 'pewter', 'stone'],
         }
 
         for category, keywords in color_categories.items():
             if any(keyword in color_lower for keyword in keywords):
                 return category
 
-        return 'Multicolor'
+        return 'Multicoloured'
 
     def calculate_launch_date(self) -> str:
         """计算上线日期（北京时间逻辑）"""
@@ -1167,6 +1261,9 @@ class ExcelProcessor:
                 except Exception:
                     pass
 
+        if template_type not in TEMPLATES:
+            raise ValueError(f"当前实例不支持模板类型: {template_type}")
+
         job_started_at = perf_counter()
         progress(f"[DEBUG] template_type = {template_type}")
         progress(f"[DEBUG] image_variant = {TEMPLATES[template_type]['image_variant']}")
@@ -1218,9 +1315,59 @@ class ExcelProcessor:
             size_display = normalize_size_display(size_value)
             return re.sub(r'\bUS\d{1,2}\b', f'US{size_display}', text, flags=re.IGNORECASE)
 
+        def title_case_product_name(text: str) -> str:
+            small_words = {
+                "an", "and", "as", "at", "but", "by", "for", "from",
+                "in", "nor", "of", "on", "or", "the", "to", "with"
+            }
+
+            def capitalize_token_part(part: str, is_first_part: bool) -> str:
+                if not part:
+                    return part
+                if not is_first_part and part.lower() in small_words:
+                    return part.lower()
+                return part[0].upper() + part[1:]
+
+            transformed_tokens: List[str] = []
+            for token_index, token in enumerate(text.split(" ")):
+                if not token:
+                    transformed_tokens.append(token)
+                    continue
+                parts = token.split("-")
+                transformed_parts = [
+                    capitalize_token_part(part, token_index == 0 and part_index == 0)
+                    for part_index, part in enumerate(parts)
+                ]
+                transformed_tokens.append("-".join(transformed_parts))
+            return " ".join(transformed_tokens)
+
         def resolve_color_text(color_code: str) -> str:
             color_name = color_mapper.get_color_name(color_code)
             return color_name if color_name else color_code
+
+        # 常见颜色关键词，用于标题中的颜色短语匹配（如 "Blush Pink" → 整体替换）
+        _color_keywords = sorted(
+            {
+                kw
+                for words in (
+                    ['purple', 'violet', 'lavender', 'plum', 'lilac', 'mauve', 'periwinkle', 'orchid'],
+                    ['blue', 'navy', 'azure', 'cyan', 'teal', 'cobalt', 'indigo', 'denim', 'sky'],
+                    ['green', 'olive', 'lime', 'mint', 'sage', 'emerald', 'forest'],
+                    ['red', 'crimson', 'burgundy', 'wine', 'maroon', 'rust', 'cherry', 'scarlet'],
+                    ['pink', 'rose', 'coral', 'fuchsia', 'blush', 'magenta', 'salmon'],
+                    ['orange', 'peach', 'apricot', 'amber', 'copper'],
+                    ['black', 'white', 'ivory', 'cream', 'beige', 'gold', 'golden', 'silver'],
+                    ['yellow', 'lemon', 'mustard', 'champagne'],
+                    ['brown', 'tan', 'khaki', 'coffee', 'chocolate', 'caramel', 'taupe'],
+                    ['grey', 'gray', 'charcoal', 'slate'],
+                    ['multicolor', 'floral', 'print', 'pattern'],
+                )
+                for kw in words
+            },
+            key=len,
+            reverse=True,
+        )
+        _trailing_color_alt = "|".join(re.escape(kw) for kw in _color_keywords)
 
         def replace_color_whole_words(text: str, source_color_code: str, target_color_code: str, *, lower_target: bool = False) -> str:
             source_text = resolve_color_text(source_color_code).strip()
@@ -1232,12 +1379,23 @@ class ExcelProcessor:
                 source_text = source_text.lower()
                 target_text = target_text.lower()
 
+            # 先尝试匹配 source_text + 可选的尾随颜色词（如 "Blush Pink"）
             replaced = re.sub(
-                rf'(?<![A-Za-z0-9]){re.escape(source_text)}(?![A-Za-z0-9])',
+                rf'(?<![A-Za-z0-9]){re.escape(source_text)}(?:\s+(?:{_trailing_color_alt}))?(?![A-Za-z0-9])',
                 target_text,
                 text,
                 flags=re.IGNORECASE,
             )
+
+            # Fallback: try normalized form with '&' stripped (e.g. 'Black & Gold' -> 'Black Gold')
+            if replaced == text and '&' in source_text:
+                normalized_source = re.sub(r'\s*&\s*', ' ', source_text).strip()
+                replaced = re.sub(
+                    rf'(?<![A-Za-z0-9]){re.escape(normalized_source)}(?:\s+(?:{_trailing_color_alt}))?(?![A-Za-z0-9])',
+                    target_text,
+                    text,
+                    flags=re.IGNORECASE,
+                )
 
             # 兼容 mint/light/dark 等前缀颜色词，保持整词匹配
             base_word = source_text.split()[-1]
@@ -1259,8 +1417,8 @@ class ExcelProcessor:
             return "SizeName-ColorName"
 
         field_aliases: Dict[str, List[str]] = {
-            "key product features": ["Bullet Point", "Special Features", "Features"],
-            "generic keyword": ["Generic Keywords"],
+            "key_product_features": ["Bullet Point", "Special Features", "Features"],
+            "generic_keyword": ["Generic Keywords"],
         }
 
         def read_source_value(
@@ -1334,7 +1492,10 @@ class ExcelProcessor:
                 raise ValueError(f"未知的目标颜色代码: {target_color}")
 
         # 固定输出模板（保持模板格式）
-        template_file = TEMPLATES[template_type]["template_file"]
+        if normalized_processing_mode == "add-color" and template_type == "EPUS":
+            template_file = ADD_COLOR_TEMPLATE_FILE
+        else:
+            template_file = TEMPLATES[template_type]["template_file"]
         template_path = UPLOADS_DIR / template_file
         if not template_path.exists():
             raise FileNotFoundError(f"模板文件不存在: {template_file}")
@@ -1440,7 +1601,7 @@ class ExcelProcessor:
         style_number_col = first_output_col("Style Number", default=10)
         manufacturer_part_number_col = first_output_col("Manufacturer Part Number", default=13)
         main_image_col = first_output_col("Main Image URL", default=73)
-        swatch_image_col = first_output_col("Swatch Image URL", default=82)
+        swatch_image_col = output_header_map.get(self._normalize_header("Swatch Image URL"), [None])[0]
         other_image_cols = all_output_cols("Other Image URL")
         if not other_image_cols:
             other_image_cols = list(range(74, 82))
@@ -1456,6 +1617,8 @@ class ExcelProcessor:
         release_date_cols = all_output_cols("Release Date")
         if not release_date_cols:
             release_date_cols = [520]
+        restock_date_cols = all_output_cols("Restock Date") if template_type in {"DaMaUS", "PZUS"} else []
+        product_tax_code_cols = all_output_cols("Product Tax Code") if template_type in {"DaMaUS", "PZUS"} else []
         quantity_price_type_cols = all_output_cols("Quantity Price Type")
         quantity_lower_bound_1_cols = all_output_cols("Quantity Lower Bound 1")
         quantity_lower_bound_2_cols = all_output_cols("Quantity Lower Bound 2")
@@ -1650,11 +1813,16 @@ class ExcelProcessor:
             else:
                 source_style = normalized_source_style_map.get(req_info.product_code, req_info.product_code)
                 effective_size = target_size or req_info.size
+                target_color_code = (target_color or req_info.color_code).upper()
                 has_base_suffix = bool(
-                    style_size_suffix_to_source.get((source_style, effective_size, base_suffix))
+                    style_color_size_suffix_to_source.get(
+                        (source_style, target_color_code, effective_size, base_suffix)
+                    )
                 )
                 has_plus_suffix = bool(
-                    style_size_suffix_to_source.get((source_style, effective_size, plus_suffix))
+                    style_color_size_suffix_to_source.get(
+                        (source_style, target_color_code, effective_size, plus_suffix)
+                    )
                 )
                 if has_base_suffix and not has_plus_suffix:
                     targets = [base_suffix]
@@ -1663,7 +1831,21 @@ class ExcelProcessor:
                 elif has_base_suffix and has_plus_suffix:
                     targets = [base_suffix, plus_suffix]
                 else:
-                    targets = [self._generate_suffix(template_type, effective_size)]
+                    # 新颜色回退：参照同款其他颜色的后缀分布，不盲目按 size 阈值
+                    style_has_base = bool(
+                        style_size_suffix_to_source.get((source_style, effective_size, base_suffix))
+                    )
+                    style_has_plus = bool(
+                        style_size_suffix_to_source.get((source_style, effective_size, plus_suffix))
+                    )
+                    if style_has_base and style_has_plus:
+                        targets = [self._generate_suffix(template_type, effective_size)]
+                    elif style_has_plus:
+                        targets = [plus_suffix]
+                    elif style_has_base:
+                        targets = [base_suffix]
+                    else:
+                        targets = [self._generate_suffix(template_type, effective_size)]
             for sfx in targets:
                 candidate = f"{req_info.product_code}{req_info.color_code}{req_info.size}{sfx}"
                 if candidate not in expanded_seen:
@@ -1675,6 +1857,23 @@ class ExcelProcessor:
         add_color_display_source_refs: Dict[Tuple[str, str], str] = {}
         follow_sell_canonical_refs: Dict[Tuple[str, str], str] = {}
         add_color_display_price_cache: Dict[str, float] = {}
+        majority_price_by_product_code: Dict[str, float] = {}
+        code_prices: Dict[str, List[float]] = {}
+
+        for pm_sku, pm_price in price_map.items():
+            try:
+                pm_info = self.parse_sku(pm_sku)
+                key = pm_info.product_code
+            except Exception:
+                key = pm_sku[:7] if len(pm_sku) >= 7 else pm_sku
+            code_prices.setdefault(key, []).append(pm_price)
+
+        for key, prices in code_prices.items():
+            counter = Counter(prices)
+            majority_price_by_product_code[key] = sorted(
+                counter.keys(),
+                key=lambda price: (-counter[price], price),
+            )[0]
 
         process_rows_started_at = perf_counter()
         progress(f"正在处理 {len(expanded_skus)} 个 SKU...")
@@ -1686,19 +1885,38 @@ class ExcelProcessor:
 
             source_ref = None
             if follow_sell_mode:
-                # 跟卖必须按老款一对一匹配，避免 Product ID/Color 串值
-                for sfx in suffix_candidates(info.suffix):
-                    source_ref = style_color_size_suffix_to_source.get((source_style, info.color_code, info.size, sfx))
+                # 跟卖：严格匹配后缀族，base后缀允许回退到无后缀，禁止跨族（-USA不能取-PH）
+                _follow_sfx_candidates = [info.suffix, '']
+                source_ref = None
+                for _sfx in _follow_sfx_candidates:
+                    source_ref = style_color_size_suffix_to_source.get(
+                        (source_style, info.color_code, info.size, _sfx)
+                    )
                     if source_ref:
                         break
-                if source_ref is None:
-                    source_ref = style_color_size_to_source.get((source_style, info.color_code, info.size))
             else:
-                # 优先完整 SKU 匹配，再回退到 11 位基准匹配
-                source_ref = sku_to_source.get(sku)
-                if source_ref is None and len(sku) >= 11:
-                    source_ref = sku_base_to_source.get(sku[:11])
+                source_ref = None
                 allow_generic_fallback = True
+
+                if effective_match_mode == "add-code":
+                    # 加码：严格匹配前9位(style+color)，并兼容当前店铺后缀族。
+                    source_ref = self._resolve_add_code_source_ref(
+                        requested_sku=sku,
+                        info=info,
+                        source_style=source_style,
+                        sku_to_source=sku_to_source,
+                        sku_base_to_source=sku_base_to_source,
+                        style_color_suffix_to_source=style_color_suffix_to_source,
+                        style_color_to_source=style_color_to_source,
+                        suffixes=suffix_candidates(info.suffix),
+                    )
+                    # 加码必须保持同色，禁止回退到无颜色约束匹配
+                    allow_generic_fallback = False
+                else:
+                    # 其他模式优先完整 SKU 匹配，再回退到 11 位基准匹配
+                    source_ref = sku_to_source.get(sku)
+                    if source_ref is None and len(sku) >= 11:
+                        source_ref = sku_base_to_source.get(sku[:11])
 
                 if source_ref is None and effective_match_mode == "add-color":
                     # 加色：前7位 + 后2位(size)，并兼容当前店铺后缀族
@@ -1708,16 +1926,6 @@ class ExcelProcessor:
                             break
                     if source_ref is None:
                         source_ref = style_size_to_source.get((source_style, info.size))
-                elif source_ref is None and effective_match_mode == "add-code":
-                    # 加码：前9位(style+color)，并兼容当前店铺后缀族
-                    for sfx in suffix_candidates(info.suffix):
-                        source_ref = style_color_suffix_to_source.get((source_style, info.color_code, sfx))
-                        if source_ref:
-                            break
-                    if source_ref is None:
-                        source_ref = style_color_to_source.get((source_style, info.color_code))
-                    # 加码必须保持同色，禁止回退到无颜色约束匹配
-                    allow_generic_fallback = False
 
                 # 通用回退：前7位+后缀，再退化到前7位
                 if source_ref is None and allow_generic_fallback:
@@ -1731,7 +1939,7 @@ class ExcelProcessor:
             source_file = source_file_by_sku.get(source_sku, "")
             source_header_map = source_header_map_by_file.get(source_file, {})
             if follow_sell_mode:
-                canonical_key = (source_style, info.color_code)
+                canonical_key = (source_style, info.color_code, info.suffix)
                 canonical_sku = follow_sell_canonical_refs.setdefault(canonical_key, source_sku)
                 canonical_row_values = source_rows.get(canonical_sku, source_row_values)
                 canonical_file = source_file_by_sku.get(canonical_sku, source_file)
@@ -1835,7 +2043,7 @@ class ExcelProcessor:
                             output_ws.cell(row=output_row_idx, column=out_cols[0]).value = value
 
             # Product Type 统一小写（与模板样例一致）
-            product_type_cols = output_header_map.get("product type", [])
+            product_type_cols = output_header_map.get(self._normalize_header("product type"), [])
             if product_type_cols:
                 product_type_val = output_ws.cell(row=output_row_idx, column=product_type_cols[0]).value
                 if product_type_val:
@@ -1863,15 +2071,18 @@ class ExcelProcessor:
                 output_ws.cell(row=output_row_idx, column=col).value = 8
 
             # 图片字段：默认严格沿用模板原型行（与正确样例一致）
-            image_copy_cols = [main_image_col, *other_image_cols, swatch_image_col]
+            image_copy_cols = [main_image_col, *other_image_cols]
+            if swatch_image_col is not None:
+                image_copy_cols.append(swatch_image_col)
             for col_idx in dict.fromkeys(image_copy_cols):
                 if col_idx <= len(prototype_values):
                     output_ws.cell(row=output_row_idx, column=col_idx).value = prototype_values[col_idx - 1]
                 else:
                     output_ws.cell(row=output_row_idx, column=col_idx).value = None
-            output_ws.cell(row=output_row_idx, column=swatch_image_col).value = output_ws.cell(
-                row=output_row_idx, column=main_image_col
-            ).value
+            if swatch_image_col is not None:
+                output_ws.cell(row=output_row_idx, column=swatch_image_col).value = output_ws.cell(
+                    row=output_row_idx, column=main_image_col
+                ).value
 
             # 尺码字段：始终按目标 SKU 同步（不依赖 target_size 模式）
             size_without_leading_zero = str(int(info.size))
@@ -1881,10 +2092,13 @@ class ExcelProcessor:
             # 产品名中的 US 尺码与目标 SKU 对齐
             name_cell = output_ws.cell(row=output_row_idx, column=product_name_col)
             if name_cell.value:
-                name_cell.value = replace_us_size_token(str(name_cell.value), info.size)
+                product_name = replace_us_size_token(str(name_cell.value), info.size)
+                name_cell.value = (
+                    title_case_product_name(product_name) if not follow_sell_mode else product_name
+                )
 
             # Outer Material Type：仅填充第一列，后续重复列保持空白
-            outer_material_cols = output_header_map.get("outer material type", [])
+            outer_material_cols = output_header_map.get(self._normalize_header("outer material type"), [])
             if outer_material_cols:
                 material_candidates = [
                     [f"material{i}", f"material {i}"]
@@ -1924,7 +2138,7 @@ class ExcelProcessor:
                 ],
             )
             if material_authority_value is not None:
-                fabric_type_cols = output_header_map.get("fabric type", [])
+                fabric_type_cols = output_header_map.get(self._normalize_header("fabric type"), [])
                 authority_target_cols = [*fabric_type_cols]
                 if outer_material_cols:
                     authority_target_cols.append(outer_material_cols[0])
@@ -1932,18 +2146,23 @@ class ExcelProcessor:
                     output_ws.cell(row=output_row_idx, column=col).value = material_authority_value
 
             # 修复 2：Item Length 保持空白，不影响 Item Length Description 的正常来源值。
-            item_length_cols = output_header_map.get("item length", [])
+            item_length_cols = output_header_map.get(self._normalize_header("item length"), [])
             if item_length_cols:
                 for col in item_length_cols:
                     output_ws.cell(row=output_row_idx, column=col).value = None
 
             # 覆盖 Your Price：优先价格报告，缺失时回退源表价格列
-            your_price_cols = output_header_map.get("your price", [])
+            your_price_cols = output_header_map.get(self._normalize_header("your price"), [])
             if not your_price_cols:
-                your_price_cols = output_header_map.get("price", [])
+                your_price_cols = output_header_map.get(self._normalize_header("price"), [])
 
             if use_canonical_add_color_display:
                 source_price_value = add_color_display_price_cache.get(display_source_sku)
+                if source_price_value is None:
+                    majority_price_key = (
+                        display_source_info.product_code if display_source_info else info.product_code
+                    )
+                    source_price_value = majority_price_by_product_code.get(majority_price_key)
                 if source_price_value is None:
                     source_price_value = price_map.get(display_source_sku)
                 if source_price_value is None:
@@ -1993,11 +2212,14 @@ class ExcelProcessor:
             your_price_raw = output_ws.cell(row=output_row_idx, column=your_price_col).value
             your_price = parse_price_value(your_price_raw)
             if your_price is not None:
-                list_price_cols = output_header_map.get("list price", [513])
-                business_price_cols = output_header_map.get("business price", [537])
-                quantity_price_cols = output_header_map.get("quantity price 1", output_header_map.get("quantity price", [540]))
-                quantity_price_2_cols = output_header_map.get("quantity price 2", [542])
-                quantity_price_3_cols = output_header_map.get("quantity price 3", [544])
+                list_price_cols = output_header_map.get(self._normalize_header("list price"), [513])
+                business_price_cols = output_header_map.get(self._normalize_header("business price"), [537])
+                quantity_price_cols = output_header_map.get(
+                    self._normalize_header("quantity price 1"),
+                    output_header_map.get(self._normalize_header("quantity price"), [540]),
+                )
+                quantity_price_2_cols = output_header_map.get(self._normalize_header("quantity price 2"), [542])
+                quantity_price_3_cols = output_header_map.get(self._normalize_header("quantity price 3"), [544])
                 if follow_sell_mode:
                     # 跟卖 SOP：
                     # 6) price = 老版本价格 - 0.1
@@ -2083,6 +2305,15 @@ class ExcelProcessor:
                 date_cell.value = launch_date_dt if launch_date_dt else launch_date_str
                 date_cell.number_format = "yyyy/m/d"
 
+            for col in restock_date_cols:
+                date_cell = output_ws.cell(row=output_row_idx, column=col)
+                date_cell.value = launch_date_dt if launch_date_dt else launch_date_str
+                date_cell.number_format = "yyyy/m/d"
+
+            for col in product_tax_code_cols:
+                if col <= len(prototype_values):
+                    output_ws.cell(row=output_row_idx, column=col).value = prototype_values[col - 1]
+
             # 统一计算最终颜色/尺码（支持同时加色+加码）
             final_color_code = target_color if target_color else info.color_code
             final_size = target_size if target_size else info.size
@@ -2097,29 +2328,38 @@ class ExcelProcessor:
                     "child_parent_sku_relationship[marketplace_id=ATVPDKIKX0DER]#1.parent_sku",
                 ],
             )
-            parent_sku = (
-                str(source_parent_sku).strip()
-                if source_parent_sku is not None and str(source_parent_sku).strip()
-                else f"{info.product_code}{final_suffix}"
-            )
+            if follow_sell_mode:
+                # 跟卖场景从老款源数据读父体；若老款本身无父体字段则留空，
+                # 不使用 {product_code}{suffix} fallback（避免生成假父体导致 Amazon 新建父体）。
+                parent_sku = (
+                    str(source_parent_sku).strip()
+                    if source_parent_sku is not None and str(source_parent_sku).strip()
+                    else ""
+                )
+            else:
+                parent_sku = (
+                    str(source_parent_sku).strip()
+                    if source_parent_sku is not None and str(source_parent_sku).strip()
+                    else f"{info.product_code}{final_suffix}"
+                )
 
             # 图片 URL：
-            # 1) add-code 直接沿用匹配到的源行图片，不重建
-            # 2) add-color / 其他场景在颜色变化时按目标 SKU 重建图片链接
+            # 1) add-code / add-color 直接沿用匹配到的源行图片，不重建
+            # 2) 其他场景在颜色变化时按目标 SKU 自动生成图片链接
             # 3) 若模板原型行图片为空，也自动补图，避免 Child 行缺图
             # 4) 自动生成时按店铺规则生成 1-4 图，Other Image URL5 固定放尺码图
             source_color_code = source_info.color_code if source_info else info.color_code
             color_changed = final_color_code != source_color_code
             info_for_image = source_info if source_info else info
             current_main_image_url = output_ws.cell(row=output_row_idx, column=main_image_col).value
-            use_source_images_for_add_code = (
+            use_source_images = (
                 not follow_sell_mode
                 and (
                     normalized_processing_mode == "add-code"
                     or (not normalized_processing_mode and match_mode == "add-code")
                 )
             )
-            if use_source_images_for_add_code and not clear_image_urls:
+            if use_source_images and not clear_image_urls:
                 source_main_image_url = read_source_value(
                     source_header_map,
                     source_row_values,
@@ -2140,7 +2380,7 @@ class ExcelProcessor:
                             seen_other_cols.add(col_idx)
                             source_other_cols.append(col_idx)
 
-                for idx in range(1, 6):
+                for idx in range(1, 9):
                     numbered_headers = [
                         f"Other Image URL {idx}",
                         f"other_image_url{idx}",
@@ -2167,9 +2407,10 @@ class ExcelProcessor:
                 for idx, url in enumerate(source_other_image_urls):
                     if idx < len(other_image_cols):
                         output_ws.cell(row=output_row_idx, column=other_image_cols[idx]).value = url
-                output_ws.cell(row=output_row_idx, column=swatch_image_col).value = (
-                    source_swatch_image_url if source_swatch_image_url is not None else source_main_image_url
-                )
+                if swatch_image_col is not None:
+                    output_ws.cell(row=output_row_idx, column=swatch_image_col).value = (
+                        source_swatch_image_url if source_swatch_image_url is not None else source_main_image_url
+                    )
             else:
                 needs_image_fill = color_changed or not current_main_image_url
                 if needs_image_fill and not clear_image_urls:
@@ -2204,15 +2445,17 @@ class ExcelProcessor:
                     # Other Image URL5 放尺码图
                     if len(other_image_cols) >= 5:
                         output_ws.cell(row=output_row_idx, column=other_image_cols[4]).value = size_chart_url
-                output_ws.cell(row=output_row_idx, column=swatch_image_col).value = output_ws.cell(
-                    row=output_row_idx, column=main_image_col
-                ).value
+                if swatch_image_col is not None:
+                    output_ws.cell(row=output_row_idx, column=swatch_image_col).value = output_ws.cell(
+                        row=output_row_idx, column=main_image_col
+                    ).value
 
             if clear_image_urls:
                 # 跟卖导出要求：清空 main_image_url 与 other_image_url1~5
                 for col_idx in [main_image_col, *other_image_cols[:5]]:
                     output_ws.cell(row=output_row_idx, column=col_idx).value = None
-                output_ws.cell(row=output_row_idx, column=swatch_image_col).value = None
+                if swatch_image_col is not None:
+                    output_ws.cell(row=output_row_idx, column=swatch_image_col).value = None
 
             source_variation_theme = read_source_value(
                 source_header_map,
@@ -2233,36 +2476,52 @@ class ExcelProcessor:
             # Color / Colour Map：
             # SizeColor 变体保留源值，其他变体按最终颜色码重算。
             final_color_name = color_mapper.get_color_name(final_color_code)
-            preserve_source_color = (
-                normalized_variation_theme == "SizeColor"
-                and not force_size_name_color_theme
-                and not color_changed
-            )
-
-            source_color_value = None
-            source_colour_map_value = None
-            if preserve_source_color:
-                source_color_value = read_source_value(
+            if follow_sell_mode:
+                fsc_color = read_source_value(
                     source_header_map,
                     source_row_values,
                     ["color"],
                 )
-                source_colour_map_value = read_source_value(
+                fsc_colour_map = read_source_value(
                     source_header_map,
                     source_row_values,
                     ["colour map", "color map"],
                 )
+                if fsc_color is not None:
+                    output_ws.cell(row=output_row_idx, column=color_col).value = fsc_color
+                if fsc_colour_map is not None:
+                    output_ws.cell(row=output_row_idx, column=colour_map_col).value = fsc_colour_map
+            else:
+                preserve_source_color = (
+                    normalized_variation_theme == "SizeColor"
+                    and not force_size_name_color_theme
+                    and not color_changed
+                )
 
-            if preserve_source_color and source_color_value is not None:
-                output_ws.cell(row=output_row_idx, column=color_col).value = source_color_value
-            elif final_color_name:
-                output_ws.cell(row=output_row_idx, column=color_col).value = final_color_name
+                source_color_value = None
+                source_colour_map_value = None
+                if preserve_source_color:
+                    source_color_value = read_source_value(
+                        source_header_map,
+                        source_row_values,
+                        ["color"],
+                    )
+                    source_colour_map_value = read_source_value(
+                        source_header_map,
+                        source_row_values,
+                        ["colour map", "color map"],
+                    )
 
-            if preserve_source_color and source_colour_map_value is not None:
-                output_ws.cell(row=output_row_idx, column=colour_map_col).value = source_colour_map_value
-            elif final_color_name:
-                colour_map = self.get_color_map_value(final_color_name)
-                output_ws.cell(row=output_row_idx, column=colour_map_col).value = colour_map
+                if preserve_source_color and source_color_value is not None:
+                    output_ws.cell(row=output_row_idx, column=color_col).value = source_color_value
+                elif final_color_name:
+                    output_ws.cell(row=output_row_idx, column=color_col).value = final_color_name
+
+                if preserve_source_color and source_colour_map_value is not None:
+                    output_ws.cell(row=output_row_idx, column=colour_map_col).value = source_colour_map_value
+                elif final_color_name:
+                    colour_map = self.get_color_map_value(final_color_name)
+                    output_ws.cell(row=output_row_idx, column=colour_map_col).value = colour_map
 
             # Generic Keyword
             generic_keyword_cell = output_ws.cell(row=output_row_idx, column=generic_keyword_col)
@@ -2288,13 +2547,13 @@ class ExcelProcessor:
             output_ws.cell(row=output_row_idx, column=seller_sku_col).value = final_sku
             output_ws.cell(row=output_row_idx, column=style_number_col).value = final_sku
             output_ws.cell(row=output_row_idx, column=manufacturer_part_number_col).value = final_sku
-            parent_sku_cols = output_header_map.get("parent sku", [])
+            parent_sku_cols = output_header_map.get(self._normalize_header("parent sku"), [])
             for col in parent_sku_cols:
                 output_ws.cell(row=output_row_idx, column=col).value = parent_sku
 
             # Variation Theme：
             # SIZE/COLOR -> SizeColor，其余统一为 SizeName-ColorName。
-            variation_theme_cols = output_header_map.get("variation theme", [])
+            variation_theme_cols = output_header_map.get(self._normalize_header("variation theme"), [])
             for col in variation_theme_cols:
                 cell = output_ws.cell(row=output_row_idx, column=col)
                 cell.value = normalized_variation_theme
@@ -2325,7 +2584,9 @@ class ExcelProcessor:
                         final_color_code,
                     )
                 product_name = replace_us_size_token(product_name, final_size)
-                name_cell.value = product_name
+                name_cell.value = (
+                    title_case_product_name(product_name) if not follow_sell_mode else product_name
+                )
 
             source_item_length_description = read_source_value(
                 display_source_header_map,
@@ -2355,6 +2616,9 @@ class ExcelProcessor:
                     )
                     for col, value in zip(embellishment_feature_cols, embellishment_values):
                         output_ws.cell(row=output_row_idx, column=col).value = value
+            if template_type == "DaMaUS" and len(embellishment_feature_cols) >= 3:
+                output_ws.cell(row=output_row_idx, column=embellishment_feature_cols[1]).value = None
+                output_ws.cell(row=output_row_idx, column=embellishment_feature_cols[2]).value = None
 
             # 尺码列放在本行最后强制同步，避免被中间映射覆盖
             size_without_leading_zero = normalize_size_display(final_size)
@@ -2370,8 +2634,8 @@ class ExcelProcessor:
             for col in dict.fromkeys(item_condition_cols):
                 output_ws.cell(row=output_row_idx, column=col).value = "New"
 
-            product_id_cols = output_header_map.get("product id", [])
-            product_id_type_cols = output_header_map.get("product id type", [])
+            product_id_cols = output_header_map.get(self._normalize_header("product id"), [])
+            product_id_type_cols = output_header_map.get(self._normalize_header("product id type"), [])
             if follow_sell_mode:
                 source_product_id = (
                     asin_map.get(source_sku)

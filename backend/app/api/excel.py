@@ -13,10 +13,11 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.config import UPLOADS_DIR, RESULTS_DIR, TEMPLATES, STORE_CONFIGS
+from app.config import DEFAULT_TEMPLATE_TYPE, RESULTS_DIR, STORE_CONFIGS, STORE_GROUP, TEMPLATES, UPLOADS_DIR
 from app.core.excel_processor import excel_processor
 from app.core.export_history import export_history
 from app.core.follow_sell_processor import follow_sell_processor
+from app.core.output_validator import validate_output
 from app.models.excel import (
     AnalysisResult,
     ProcessRequest,
@@ -106,10 +107,12 @@ def _run_process_job(job_id: str, request: ProcessRequest) -> None:
 
 
 def _resolve_store_config(template_type: Optional[str]) -> Dict:
-    return STORE_CONFIGS.get(str(template_type or "").strip(), STORE_CONFIGS["EPUS"])
+    normalized = str(template_type or "").strip()
+    resolved_template_type = normalized if normalized in STORE_CONFIGS else DEFAULT_TEMPLATE_TYPE
+    return STORE_CONFIGS[resolved_template_type]
 
 
-def _resolve_follow_sell_source_files(template_type: Optional[str] = "EPUS") -> List[str]:
+def _resolve_follow_sell_source_files(template_type: Optional[str] = None) -> List[str]:
     store_config = _resolve_store_config(template_type)
     source_files = [name for name in store_config["source_files"] if (UPLOADS_DIR / name).exists()]
     listing_report = str(store_config["listing_report"])
@@ -190,6 +193,54 @@ def _validate_selection_constraints(generated_skus: Optional[List[str]]) -> None
         raise HTTPException(status_code=400, detail="目标 SKU 格式不正确，无法识别颜色或尺码")
 
 
+def _build_data_source_warning(new_style: Optional[str], old_style: Optional[str]) -> Optional[str]:
+    normalized_new = str(new_style or "").strip().upper()
+    normalized_old = str(old_style or "").strip().upper()
+    if normalized_new and normalized_old and normalized_new != normalized_old:
+        return f"数据来自老款号 {normalized_old}，请确认新老款对应关系正确"
+    return None
+
+
+def _build_per_skc_summary(
+    success_results: List[Dict],
+    generated_skus: List[str],
+    *,
+    start_row: int = 4,
+) -> List[Dict]:
+    row_by_sku = {
+        str(sku).strip().upper(): start_row + index
+        for index, sku in enumerate(generated_skus)
+        if str(sku).strip()
+    }
+    summaries: List[Dict] = []
+
+    for result in success_results:
+        rows: List[int] = []
+        seen = set()
+        for item in result.get("sizes", []):
+            sku = str(item.get("sku", "")).strip().upper()
+            if len(sku) < 11 or sku in seen:
+                continue
+            seen.add(sku)
+            row_number = row_by_sku.get(sku)
+            if row_number is not None:
+                rows.append(row_number)
+
+        if not rows:
+            continue
+
+        summaries.append({
+            "skc": str(result.get("skc", "")).strip().upper(),
+            "new_style": str(result.get("new_style", "")).strip().upper(),
+            "old_style": str(result.get("old_style", "")).strip().upper(),
+            "row_count": len(rows),
+            "start_row": rows[0],
+            "end_row": rows[-1],
+        })
+
+    return summaries
+
+
 def _record_export_history(
     *,
     module: str,
@@ -222,6 +273,16 @@ def _resolve_generated_file_path(filename: str) -> Path:
     if result_path.exists():
         return result_path
     return UPLOADS_DIR / filename
+
+
+def _safe_validate_generated_output(filename: str, template_type: str) -> Optional[Dict]:
+    try:
+        file_path = _resolve_generated_file_path(filename)
+        if not file_path.exists():
+            return None
+        return validate_output(str(file_path), template_type)
+    except Exception:
+        return None
 
 
 @router.get("/templates", response_model=List[TemplateInfo])
@@ -498,20 +559,45 @@ async def download_file(filename: str):
     )
 
 
+@router.get("/store-info")
+async def get_store_info():
+    """返回当前实例的店铺信息"""
+    _display = {"EP": "EP 店铺", "DM_PZ": "DM/PZ 店铺"}
+    return {
+        "store_group": STORE_GROUP or "ALL",
+        "display_name": _display.get(STORE_GROUP or "", "全部店铺"),
+    }
+
+
 @router.get("/files", response_model=List[FileInfo])
 async def list_files():
-    """列出所有已上传的文件"""
+    """列出已上传的文件（按当前实例的店铺过滤）"""
+    # 从 source_files 和 listing_report 的实际文件名提取前缀（取第一个 "-" 前的部分）
+    if STORE_GROUP:
+        _prefixes = set()
+        for cfg in STORE_CONFIGS.values():
+            for fname in cfg.get("source_files", []):
+                _prefixes.add(fname.split("-")[0].upper() + "-")
+            report = cfg.get("listing_report", "")
+            if report:
+                _prefixes.add(report.split("-")[0].upper() + "-")
+        allowed_prefixes = tuple(_prefixes)
+    else:
+        allowed_prefixes = None
+
     files = []
     for file_path in UPLOADS_DIR.glob("*"):
-        if file_path.is_file():
-            stat = file_path.stat()
-            files.append(FileInfo(
-                filename=file_path.name,
-                size=stat.st_size,
-                upload_time=datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-            ))
+        if not file_path.is_file():
+            continue
+        if allowed_prefixes and not file_path.name.upper().startswith(allowed_prefixes):
+            continue
+        stat = file_path.stat()
+        files.append(FileInfo(
+            filename=file_path.name,
+            size=stat.st_size,
+            upload_time=datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        ))
 
-    # 按上传时间倒序排列
     files.sort(key=lambda x: x.upload_time, reverse=True)
     return files
 
@@ -543,6 +629,10 @@ async def query_skc(request: SKCQueryRequest):
             skc=request.skc,
             template_type=request.template_type,
         )
+        result["data_source_warning"] = _build_data_source_warning(
+            result.get("new_style"),
+            result.get("old_style"),
+        )
         return SKCQueryResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询 SKC 失败: {str(e)}")
@@ -566,9 +656,12 @@ async def process_skc(request: SKCProcessRequest):
 
         source_files = _resolve_follow_sell_source_files(request.template_type)
 
-        if len(source_files) < 3:
-            store_prefix = _resolve_store_config(request.template_type)["prefix"]
-            raise HTTPException(status_code=400, detail=f"缺少 {store_prefix}-0/{store_prefix}-1/{store_prefix}-2 数据文件，无法导出")
+        store_config = _resolve_store_config(request.template_type)
+        required_xlsm = store_config["source_files"]
+        found_xlsm = [f for f in source_files if not f.endswith('.txt')]
+        missing_xlsm = [f for f in required_xlsm if f not in found_xlsm]
+        if missing_xlsm:
+            raise HTTPException(status_code=400, detail=f"缺少数据文件: {', '.join(missing_xlsm)}，无法导出")
 
         output_filename, _processed_count = excel_processor.process_excel(
             template_type=request.template_type,
@@ -582,6 +675,7 @@ async def process_skc(request: SKCProcessRequest):
             follow_sell_mode=True,
         )
         history_filename, _file_size = _rename_follow_sell_export(output_filename, query_result["skc"])
+        validation = _safe_validate_generated_output(history_filename, request.template_type)
         _record_export_history(
             module="follow-sell",
             template_type=request.template_type,
@@ -602,6 +696,7 @@ async def process_skc(request: SKCProcessRequest):
             total_skus=len(generated_skus),
             output_filename=history_filename,
             message=f"导出成功，共生成 {len(generated_skus)} 个 SKU",
+            validation=validation,
         )
     except HTTPException:
         raise
@@ -613,11 +708,14 @@ async def process_skc(request: SKCProcessRequest):
 async def process_skc_batch(request: SKCBatchProcessRequest):
     """根据多条 SKC 批量匹配并合并导出一个模板 Excel"""
     try:
-        normalized_skcs = list({
-            str(item).strip().upper()
-            for item in request.skcs
-            if str(item).strip()
-        })
+        normalized_skcs: List[str] = []
+        seen_skcs = set()
+        for item in request.skcs:
+            normalized = str(item).strip().upper()
+            if not normalized or normalized in seen_skcs:
+                continue
+            seen_skcs.add(normalized)
+            normalized_skcs.append(normalized)
         if not normalized_skcs:
             raise HTTPException(status_code=400, detail="请至少提供一条有效 SKC")
 
@@ -652,10 +750,15 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
         if not generated_skus:
             raise HTTPException(status_code=400, detail="未生成有效 SKU，无法导出")
 
+        per_skc_summary = _build_per_skc_summary(success_results, generated_skus)
+
         source_files = _resolve_follow_sell_source_files(request.template_type)
-        if len(source_files) < 3:
-            store_prefix = _resolve_store_config(request.template_type)["prefix"]
-            raise HTTPException(status_code=400, detail=f"缺少 {store_prefix}-0/{store_prefix}-1/{store_prefix}-2 数据文件，无法导出")
+        store_config = _resolve_store_config(request.template_type)
+        required_xlsm = store_config["source_files"]
+        found_xlsm = [f for f in source_files if not f.endswith('.txt')]
+        missing_xlsm = [f for f in required_xlsm if f not in found_xlsm]
+        if missing_xlsm:
+            raise HTTPException(status_code=400, detail=f"缺少数据文件: {', '.join(missing_xlsm)}，无法导出")
 
         output_filename, _processed_count = excel_processor.process_excel(
             template_type=request.template_type,
@@ -674,6 +777,7 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
         )
         batch_skc = ",".join(normalized_skcs)
         history_filename, _file_size = _rename_follow_sell_export(output_filename, "batch")
+        validation = _safe_validate_generated_output(history_filename, request.template_type)
         new_styles = sorted({
             str(item.get("new_style", "")).strip().upper()
             for item in success_results
@@ -702,11 +806,12 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
             success_skcs=len(success_results),
             failed_skcs=failed_count,
             total_skus=len(generated_skus),
+            per_skc_summary=per_skc_summary,
             output_filename=history_filename,
             message=f"批量导出成功：SKC 成功 {len(success_results)}，失败 {failed_count}，SKU 共 {len(generated_skus)}",
+            validation=validation,
         )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"批量处理 SKC 失败: {str(e)}")
-

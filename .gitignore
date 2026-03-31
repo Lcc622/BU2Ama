@@ -50,6 +50,17 @@ backend/data/colorMapping.json
 !加色模板.xlsm
 !EP-ES01840FL-加色-Coco-2.4新表.xlsm
 
+# EP / DMPZ 拆分项目的运行时数据
+ep/backend/uploads/*
+ep/backend/results/*
+ep/frontend/node_modules/
+ep/frontend/dist/
+dmpz/backend/uploads/*
+dmpz/backend/results/*
+dmpz/frontend/node_modules/
+dmpz/frontend/dist/
+*.db
+
 # Build outputs
 frontend/dist/
 frontend/build/

@@ -1,11 +1,9 @@
 # Findings
 
-- The current fixed code successfully generated 7 DAMA rows for `ES01819NT` sizes `14,16,18,20,22,24,26`.
-- New output workbook: `results/processed_20260306_131248.xlsx`.
-- Historical workbook: `results/processed_20260305_091424.xlsx`.
-- Requested fixes are reflected in the new output:
-  - Seller SKU / Style Number / Manufacturer Part Number now end with `-PLPH` for all tested sizes.
-  - Parent SKU now resolves to `ES01819-PLPH` instead of inheriting `EE0168B-PLPH` from source data.
-  - Variation Theme now outputs `SizeName-ColorName` instead of `SizeColor`.
-- `Outer Material Type` is populated as `100%Polyester` for all 7 rows in the new output.
-- In this specific historical workbook, `Outer Material Type` was already populated, so this field shows no regression rather than a visible diff for this case.
+- Follow-sell export responses are produced by `process_skc` and `process_skc_batch` in `backend/app/api/excel.py`.
+- Current response models in `backend/app/models/excel.py` do not expose any `validation` field, so schema changes are required.
+- Workbook header utilities already exist in `backend/tests/test_export_regressions.py`:
+  - headers are read from rows `2` and `3`
+  - data rows start at row `4`
+- `excel_processor.py` already treats output fields such as `Colour Map`, `Release Date`, `Restock Date`, `Product Tax Code`, `Your Price`, and `Business Price` as first-class output columns, which aligns with the new validator requirements.
+- Project currently depends on `openpyxl` but not `anthropic`, so optional LLM validation must handle missing SDK and missing `ANTHROPIC_API_KEY` gracefully.

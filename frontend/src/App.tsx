@@ -173,6 +173,12 @@ function App() {
               <div>
                 <h1 className="text-2xl font-bold text-primary-900">
                   Excel 颜色加色系统
+                  {import.meta.env.VITE_STORE_GROUP === 'EP' && (
+                    <span className="ml-2 text-base font-semibold text-blue-600">· EP 店铺</span>
+                  )}
+                  {import.meta.env.VITE_STORE_GROUP === 'DM_PZ' && (
+                    <span className="ml-2 text-base font-semibold text-orange-600">· DM/PZ 店铺</span>
+                  )}
                 </h1>
                 <p className="text-sm text-slate-600 mt-0.5">
                   SKU 颜色映射和处理系统 v2.0
