@@ -1268,6 +1268,26 @@ class ExcelProcessor:
         }
         normalized_processing_mode = str(processing_mode or "").strip().lower()
 
+        # 加色/加码模式下自动加载新老款映射，确保迭代款能正确映射到老款数据源
+        if not normalized_source_style_map and normalized_processing_mode in ("add-color", "add-code"):
+            mapping_file = UPLOADS_DIR / "新老款映射信息(1).xlsx"
+            if mapping_file.exists():
+                try:
+                    import openpyxl as _openpyxl
+                    _wb = _openpyxl.load_workbook(mapping_file, read_only=True, data_only=True)
+                    _ws = _wb.active
+                    for _row in _ws.iter_rows(min_row=2, values_only=True):
+                        if _row and len(_row) >= 2 and _row[0] and _row[1]:
+                            _old = str(_row[0]).strip().upper()
+                            _new = str(_row[1]).strip().upper()
+                            if _old != _new:
+                                normalized_source_style_map[_new] = _old
+                    _wb.close()
+                    if normalized_source_style_map:
+                        progress(f"[DEBUG] 自动加载新老款映射: {len(normalized_source_style_map)} 条")
+                except Exception as e:
+                    progress(f"[WARN] 加载新老款映射失败: {e}")
+
         def prefix_matches(product_code: str) -> bool:
             # 兼容 6 位前缀（如 ES0128）和 7 位款号（如 ES0128B）
             code = str(product_code).strip().upper()
@@ -1874,6 +1894,12 @@ class ExcelProcessor:
                     )
                     if source_ref:
                         break
+                # 回退：忽略后缀维度，按 style+color+size 匹配
+                # 解决 follow_sell_processor 后缀归一化（-US→-USA）与源数据原始后缀不一致的问题
+                if source_ref is None:
+                    source_ref = style_color_size_to_source.get(
+                        (source_style, info.color_code, info.size)
+                    )
             else:
                 source_ref = None
                 allow_generic_fallback = True
@@ -1893,10 +1919,14 @@ class ExcelProcessor:
                     # 加码必须保持同色，禁止回退到无颜色约束匹配
                     allow_generic_fallback = False
                 else:
-                    # 其他模式优先完整 SKU 匹配，再回退到 11 位基准匹配
-                    source_ref = sku_to_source.get(sku)
-                    if source_ref is None and len(sku) >= 11:
-                        source_ref = sku_base_to_source.get(sku[:11])
+                    # 有新老款映射且为加色/加码模式时，跳过精确SKU匹配，
+                    # 避免匹配到新款自身的行（数据可能不准确），强制走老款 style-based 查找
+                    _has_style_remap = (info.product_code != source_style)
+                    if not _has_style_remap:
+                        # 其他模式优先完整 SKU 匹配，再回退到 11 位基准匹配
+                        source_ref = sku_to_source.get(sku)
+                        if source_ref is None and len(sku) >= 11:
+                            source_ref = sku_base_to_source.get(sku[:11])
 
                 if source_ref is None and effective_match_mode == "add-color":
                     # 加色：前7位 + 后2位(size)，并兼容当前店铺后缀族
@@ -2558,7 +2588,9 @@ class ExcelProcessor:
                 for col in item_length_description_cols:
                     output_ws.cell(row=output_row_idx, column=col).value = source_item_length_description
 
-            if use_canonical_add_color_display:
+            # 加色 / 加码 / 跟卖模式：用 display_source 覆盖 bullet points，
+            # 避免模板原型行的默认值残留。
+            if (use_canonical_add_color_display or normalized_processing_mode == "add-code" or follow_sell_mode):
                 if key_product_feature_cols:
                     feature_values = read_repeated_source_values(
                         display_source_header_map,
@@ -2568,6 +2600,48 @@ class ExcelProcessor:
                     )
                     for col, value in zip(key_product_feature_cols, feature_values):
                         output_ws.cell(row=output_row_idx, column=col).value = value
+
+            # 跟卖 / 加色 / 加码：用源数据覆盖模板原型行残留的属性默认值
+            if follow_sell_mode or normalized_processing_mode in ("add-color", "add-code"):
+                _fs_single_fields = [
+                    (["Brand Name"], ["Brand Name"]),
+                    (["NeckStyle", "Neck Style"], ["Neck Style", "NeckStyle"]),
+                    (["Sleeve Type"], ["Sleeve Type"]),
+                    (["material_type", "Material Type"], ["material_type", "Material Type", "Material"], "100%Polyester"),
+                    (["Fabric Type"], ["Fabric Type"]),
+                ]
+                # 跟卖模式：属性字段优先从新款源数据读取（NeckStyle等物理属性以新款为准）
+                attr_header_map = display_source_header_map
+                attr_row_values = display_source_row_values
+                if follow_sell_mode:
+                    _new_style_ref = style_suffix_to_source.get((info.product_code, info.suffix))
+                    if _new_style_ref is None:
+                        _new_style_ref = style_to_source.get(info.product_code)
+                    if _new_style_ref:
+                        _new_row = source_rows.get(_new_style_ref, [])
+                        _new_file = source_file_by_sku.get(_new_style_ref, "")
+                        _new_hmap = source_header_map_by_file.get(_new_file, {})
+                        if _new_row:
+                            attr_header_map = _new_hmap
+                            attr_row_values = _new_row
+                for _fs_entry in _fs_single_fields:
+                    out_names, candidates = _fs_entry[0], _fs_entry[1]
+                    fallback = _fs_entry[2] if len(_fs_entry) > 2 else None
+                    out_cols = []
+                    for on in out_names:
+                        out_cols = output_header_map.get(self._normalize_header(on), [])
+                        if out_cols:
+                            break
+                    if out_cols:
+                        value = read_source_value(
+                            attr_header_map,
+                            attr_row_values,
+                            candidates,
+                        )
+                        if value is None and fallback is not None:
+                            value = fallback
+                        if value is not None:
+                            output_ws.cell(row=output_row_idx, column=out_cols[0]).value = value
 
             # 尺码列放在本行最后强制同步，避免被中间映射覆盖
             size_without_leading_zero = normalize_size_display(final_size)

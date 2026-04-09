@@ -1280,6 +1280,26 @@ class ExcelProcessor:
         }
         normalized_processing_mode = str(processing_mode or "").strip().lower()
 
+        # 加色/加码模式下自动加载新老款映射，确保迭代款能正确映射到老款数据源
+        if not normalized_source_style_map and normalized_processing_mode in ("add-color", "add-code"):
+            mapping_file = UPLOADS_DIR / "新老款映射信息(1).xlsx"
+            if mapping_file.exists():
+                try:
+                    import openpyxl as _openpyxl
+                    _wb = _openpyxl.load_workbook(mapping_file, read_only=True, data_only=True)
+                    _ws = _wb.active
+                    for _row in _ws.iter_rows(min_row=2, values_only=True):
+                        if _row and len(_row) >= 2 and _row[0] and _row[1]:
+                            _old = str(_row[0]).strip().upper()
+                            _new = str(_row[1]).strip().upper()
+                            if _old != _new:
+                                normalized_source_style_map[_new] = _old
+                    _wb.close()
+                    if normalized_source_style_map:
+                        progress(f"[DEBUG] 自动加载新老款映射: {len(normalized_source_style_map)} 条")
+                except Exception as e:
+                    progress(f"[WARN] 加载新老款映射失败: {e}")
+
         def prefix_matches(product_code: str) -> bool:
             # 兼容 6 位前缀（如 ES0128）和 7 位款号（如 ES0128B）
             code = str(product_code).strip().upper()
@@ -1489,7 +1509,10 @@ class ExcelProcessor:
                 raise ValueError(f"未知的目标颜色代码: {target_color}")
 
         # 固定输出模板（保持模板格式）
-        template_file = TEMPLATES[template_type]["template_file"]
+        template_config = TEMPLATES[template_type]
+        template_file = template_config["template_file"]
+        if follow_sell_mode and template_config.get("follow_sell_template_file"):
+            template_file = template_config["follow_sell_template_file"]
         template_path = UPLOADS_DIR / template_file
         if not template_path.exists():
             raise FileNotFoundError(f"模板文件不存在: {template_file}")
@@ -1907,10 +1930,14 @@ class ExcelProcessor:
                     # 加码必须保持同色，禁止回退到无颜色约束匹配
                     allow_generic_fallback = False
                 else:
-                    # 其他模式优先完整 SKU 匹配，再回退到 11 位基准匹配
-                    source_ref = sku_to_source.get(sku)
-                    if source_ref is None and len(sku) >= 11:
-                        source_ref = sku_base_to_source.get(sku[:11])
+                    # 有新老款映射且为加色/加码模式时，跳过精确SKU匹配，
+                    # 避免匹配到新款自身的行（数据可能不准确），强制走老款 style-based 查找
+                    _has_style_remap = (info.product_code != source_style)
+                    if not _has_style_remap:
+                        # 其他模式优先完整 SKU 匹配，再回退到 11 位基准匹配
+                        source_ref = sku_to_source.get(sku)
+                        if source_ref is None and len(sku) >= 11:
+                            source_ref = sku_base_to_source.get(sku[:11])
 
                 if source_ref is None and effective_match_mode == "add-color":
                     # 加色：前7位 + 后2位(size)，并兼容当前店铺后缀族
@@ -1949,7 +1976,12 @@ class ExcelProcessor:
             display_source_row_values = source_row_values
             display_source_header_map = source_header_map
             display_source_info = source_info
-            if use_canonical_add_color_display:
+            if follow_sell_mode:
+                # 跟卖模式：属性字段统一读取 canonical 源（同款同色第一条记录），
+                # 避免不同源行导致 Fabric Type / Outer Material Type 等字段串值。
+                display_source_row_values = canonical_row_values
+                display_source_header_map = canonical_header_map
+            elif use_canonical_add_color_display:
                 display_key = (
                     source_style,
                     "plus" if self._is_plus_body_suffix(info.suffix) else "base",
@@ -2100,8 +2132,8 @@ class ExcelProcessor:
                 first_outer_material_col = outer_material_cols[0]
                 first_material_candidates = material_candidates[0]
                 material_value = read_source_value(
-                    source_header_map,
-                    source_row_values,
+                    display_source_header_map,
+                    display_source_row_values,
                     first_material_candidates,
                 )
                 output_ws.cell(row=output_row_idx, column=first_outer_material_col).value = (
@@ -2114,8 +2146,8 @@ class ExcelProcessor:
             # 所有店铺模板统一优先取源表 Fabric Type，其次回退到第一个非空的 Material1~5，
             # 再同步覆盖 Fabric Type / Outer Material Type，避免模板默认值或重复映射导致两者不一致。
             material_authority_value = read_source_value(
-                source_header_map,
-                source_row_values,
+                display_source_header_map,
+                display_source_row_values,
                 [
                     "Fabric Type",
                     "Material1",
@@ -2299,9 +2331,7 @@ class ExcelProcessor:
                 date_cell.number_format = "yyyy/m/d"
 
             for col in restock_date_cols:
-                date_cell = output_ws.cell(row=output_row_idx, column=col)
-                date_cell.value = launch_date_dt if launch_date_dt else launch_date_str
-                date_cell.number_format = "yyyy/m/d"
+                output_ws.cell(row=output_row_idx, column=col).value = None
 
             for col in product_tax_code_cols:
                 if col <= len(prototype_values):
@@ -2589,7 +2619,13 @@ class ExcelProcessor:
                 for col in item_length_description_cols:
                     output_ws.cell(row=output_row_idx, column=col).value = source_item_length_description
 
-            if template_type == "PZUS" and use_canonical_add_color_display:
+            # 加色 / 加码模式：用 display_source 覆盖 bullet points，
+            # 避免模板原型行的默认值残留。
+            if (
+                use_canonical_add_color_display
+                or normalized_processing_mode == "add-code"
+                or follow_sell_mode
+            ):
                 if key_product_feature_cols:
                     feature_values = read_repeated_source_values(
                         display_source_header_map,
@@ -2611,6 +2647,51 @@ class ExcelProcessor:
             if template_type == "DaMaUS" and len(embellishment_feature_cols) >= 3:
                 output_ws.cell(row=output_row_idx, column=embellishment_feature_cols[1]).value = None
                 output_ws.cell(row=output_row_idx, column=embellishment_feature_cols[2]).value = None
+
+            # 跟卖 / 加色 / 加码：用源数据覆盖模板原型行残留的属性默认值
+            if follow_sell_mode or normalized_processing_mode in ("add-color", "add-code"):
+                _fs_single_fields = [
+                    (["Brand Name"], ["Brand Name"]),
+                    (["NeckStyle", "Neck Style"], ["Neck Style", "NeckStyle"]),
+                    (["Sleeve Type"], ["Sleeve Type"]),
+                    (["material_type", "Material Type"], ["material_type", "Material Type", "Material"], "100%Polyester"),
+                    (["Fabric Type"], ["Fabric Type"]),
+                ]
+                for _fs_entry in _fs_single_fields:
+                    out_names, candidates = _fs_entry[0], _fs_entry[1]
+                    fallback = _fs_entry[2] if len(_fs_entry) > 2 else None
+                    out_cols = []
+                    for on in out_names:
+                        out_cols = output_header_map.get(self._normalize_header(on), [])
+                        if out_cols:
+                            break
+                    if out_cols:
+                        value = read_source_value(
+                            display_source_header_map,
+                            display_source_row_values,
+                            candidates,
+                        )
+                        if value is None and fallback is not None:
+                            value = fallback
+                        if value is not None:
+                            output_ws.cell(row=output_row_idx, column=out_cols[0]).value = value
+
+                _fs_repeated_fields = [
+                    ("Occasion Lifestyle", ["Occasion", "Occasion Lifestyle", "Lifestyle"]),
+                ]
+                for out_name, candidates in _fs_repeated_fields:
+                    out_cols = output_header_map.get(self._normalize_header(out_name), [])
+                    if not out_cols:
+                        out_cols = output_header_map.get(self._normalize_header("lifestyle"), [])
+                    if out_cols:
+                        vals = read_repeated_source_values(
+                            display_source_header_map,
+                            display_source_row_values,
+                            candidates,
+                            len(out_cols),
+                        )
+                        for col, value in zip(out_cols, vals):
+                            output_ws.cell(row=output_row_idx, column=col).value = value
 
             # 尺码列放在本行最后强制同步，避免被中间映射覆盖
             size_without_leading_zero = normalize_size_display(final_size)

@@ -75,3 +75,7 @@ frontend/build/
 # Generated files
 *.html
 *.pdf
+
+# 每日修改总结（本地记录，不上传）
+今天修改总结_*.md
+daily_*.md
