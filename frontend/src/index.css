@@ -1,9 +1,0 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  body {
-    @apply min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50;
-  }
-}
