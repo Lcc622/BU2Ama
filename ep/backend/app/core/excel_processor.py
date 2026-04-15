@@ -1054,14 +1054,14 @@ class ExcelProcessor:
         color_lower = color_name.lower()
 
         # Multicolor 关键词优先匹配（floral/print/pattern 意味着多色，覆盖单色分类）
-        multicolor_keywords = ['multicolor', 'multi', 'floral', 'print', 'pattern', 'tie dye', 'tie-dye', 'rainbow']
+        multicolor_keywords = ['multicolor', 'multi', 'floral', 'print', 'pattern', 'tie dye', 'tie-dye', 'rainbow', 'bloom']
         if any(keyword in color_lower for keyword in multicolor_keywords):
             return 'Multicoloured'
 
         color_categories = {
             'Purple': ['purple', 'violet', 'lavender', 'plum', 'lilac', 'mauve', 'periwinkle', 'orchid', 'wisteria', 'amethyst'],
-            'Blue': ['blue', 'navy', 'azure', 'cyan', 'teal', 'cobalt', 'indigo', 'denim', 'sky', 'powder'],
-            'Green': ['green', 'olive', 'lime', 'mint', 'sage', 'emerald', 'forest', 'hunter', 'army', 'moss', 'seafoam'],
+            'Blue': ['blue', 'navy', 'azure', 'cyan', 'cobalt', 'indigo', 'denim', 'sky', 'powder'],
+            'Green': ['green', 'olive', 'lime', 'mint', 'sage', 'emerald', 'forest', 'hunter', 'army', 'moss', 'seafoam', 'teal'],
             'Red': ['red', 'crimson', 'burgundy', 'wine', 'maroon', 'rust', 'cherry', 'scarlet', 'garnet', 'ruby'],
             'Pink': ['pink', 'rose', 'coral', 'fuchsia', 'blush', 'magenta', 'salmon'],
             'Orange': ['orange', 'peach', 'apricot', 'amber', 'terracotta', 'pumpkin', 'copper', 'sienna'],
@@ -1628,6 +1628,8 @@ class ExcelProcessor:
         quantity_lower_bound_3_cols = all_output_cols("Quantity Lower Bound 3")
         item_length_description_cols = all_output_cols("Item Length Description")
         key_product_feature_cols = all_output_cols("Key Product Features", "Bullet Point")
+        embellishment_feature_cols = all_output_cols("Embellishment Feature")
+        apparel_silhouette_cols = all_output_cols("Apparel Silhouette")
 
         # 对比映射规则（Sheet1）
         mapping_rules: List[Tuple[str, str, str]] = []
@@ -1845,7 +1847,20 @@ class ExcelProcessor:
                     elif style_has_base:
                         targets = [base_suffix]
                     else:
-                        targets = [self._generate_suffix(template_type, effective_size)]
+                        # 目标 size 在源里完全缺失时，参考款号全局后缀分布
+                        # 避免 Plus-only-base 类产品被误落到 plus 后缀
+                        style_level_has_base = bool(
+                            style_suffix_to_source.get((source_style, base_suffix))
+                        )
+                        style_level_has_plus = bool(
+                            style_suffix_to_source.get((source_style, plus_suffix))
+                        )
+                        if style_level_has_base and not style_level_has_plus:
+                            targets = [base_suffix]
+                        elif style_level_has_plus and not style_level_has_base:
+                            targets = [plus_suffix]
+                        else:
+                            targets = [self._generate_suffix(template_type, effective_size)]
             for sfx in targets:
                 candidate = f"{req_info.product_code}{req_info.color_code}{req_info.size}{sfx}"
                 if candidate not in expanded_seen:
@@ -2600,6 +2615,24 @@ class ExcelProcessor:
                     )
                     for col, value in zip(key_product_feature_cols, feature_values):
                         output_ws.cell(row=output_row_idx, column=col).value = value
+                if embellishment_feature_cols:
+                    embellishment_values = read_repeated_source_values(
+                        display_source_header_map,
+                        display_source_row_values,
+                        ["Embellishment Feature", "embellishment_feature1"],
+                        len(embellishment_feature_cols),
+                    )
+                    for col, value in zip(embellishment_feature_cols, embellishment_values):
+                        output_ws.cell(row=output_row_idx, column=col).value = value
+                if apparel_silhouette_cols:
+                    silhouette_value = read_source_value(
+                        display_source_header_map,
+                        display_source_row_values,
+                        ["Apparel Silhouette", "apparel_silhouette"],
+                    )
+                    if silhouette_value is not None:
+                        for col in apparel_silhouette_cols:
+                            output_ws.cell(row=output_row_idx, column=col).value = silhouette_value
 
             # 跟卖 / 加色 / 加码：用源数据覆盖模板原型行残留的属性默认值
             if follow_sell_mode or normalized_processing_mode in ("add-color", "add-code"):

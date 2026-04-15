@@ -42,6 +42,7 @@ TEMPLATES = {
     "DaMaUS": {
         "image_variant": "PL",
         "template_file": "DAMA输出模板.xlsm",
+        "follow_sell_template_file": "DAMA跟卖模板.xlsm",
     },
     "PZUS": {
         "image_variant": "PL",

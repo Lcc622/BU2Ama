@@ -1,0 +1,28 @@
+wing: bu2ama
+rooms:
+- name: rust_backend
+  description: Files from rust-backend/
+- name: dama
+  description: Files from DAMA/
+- name: frontend
+  description: Files from frontend/
+- name: dmpz
+  description: Files from dmpz/
+- name: legacy
+  description: Files from legacy/
+- name: backend
+  description: Files from backend/
+- name: documentation
+  description: Files from docs/
+- name: templates
+  description: Files from templates/
+- name: skills
+  description: Files from skills/
+- name: data
+  description: Files from data/
+- name: scripts
+  description: Files from scripts/
+- name: testing
+  description: Files from tests/
+- name: general
+  description: Files that don't fit other rooms

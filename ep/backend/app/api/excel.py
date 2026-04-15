@@ -736,21 +736,31 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
         if missing_xlsm:
             raise HTTPException(status_code=400, detail=f"缺少数据文件: {', '.join(missing_xlsm)}，无法导出")
 
-        output_filename, _processed_count = excel_processor.process_excel(
+        source_style_map = {
+            str(result.get("new_style", "")).strip().upper(): str(result.get("old_style", "")).strip().upper()
+            for result in success_results
+            if result.get("new_style") and result.get("old_style")
+        }
+        output_filename, actual_processed_count = excel_processor.process_excel(
             template_type=request.template_type,
             filenames=source_files,
             selected_prefixes=selected_prefixes,
             generated_skus=generated_skus,
             target_color=None,
             target_size=None,
-            source_style_map={
-                str(result.get("new_style", "")).strip().upper(): str(result.get("old_style", "")).strip().upper()
-                for result in success_results
-                if result.get("new_style") and result.get("old_style")
-            },
+            source_style_map=source_style_map,
             clear_image_urls=True,
             follow_sell_mode=True,
         )
+
+        if actual_processed_count == 0:
+            old_styles_hint = ", ".join(source_style_map.values()) if source_style_map else "未知"
+            raise HTTPException(
+                status_code=400,
+                detail=f"生成了 {len(generated_skus)} 个 SKU 但在源数据中未匹配到任何行，"
+                       f"请确认老款号 {old_styles_hint} 在 EP 数据源文件中存在对应颜色/尺码数据",
+            )
+
         batch_skc = ",".join(normalized_skcs)
         history_filename, _file_size = _rename_follow_sell_export(output_filename, "batch")
         validation = _safe_validate_generated_output(history_filename, request.template_type)
@@ -773,7 +783,7 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
                 "old_style": ",".join(old_styles),
             },
             filename=history_filename,
-            processed_count=len(generated_skus),
+            processed_count=actual_processed_count,
         )
 
         return SKCBatchProcessResponse(
@@ -781,10 +791,10 @@ async def process_skc_batch(request: SKCBatchProcessRequest):
             total_input_skcs=len(normalized_skcs),
             success_skcs=len(success_results),
             failed_skcs=failed_count,
-            total_skus=len(generated_skus),
+            total_skus=actual_processed_count,
             per_skc_summary=per_skc_summary,
             output_filename=history_filename,
-            message=f"批量导出成功：SKC 成功 {len(success_results)}，失败 {failed_count}，SKU 共 {len(generated_skus)}",
+            message=f"批量导出成功：SKC 成功 {len(success_results)}，失败 {failed_count}，SKU 共 {actual_processed_count}",
             validation=validation,
         )
     except HTTPException:
