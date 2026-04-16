@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 
-from app.config import CORS_ORIGINS
+from app.config import CORS_ORIGINS, ensure_seed_uploads
 from app.api import excel, mapping
 from app.core.excel_processor import excel_processor
 from app.core.export_history import export_history
@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def prewarm_caches():
+    copied_files = ensure_seed_uploads()
+    if copied_files:
+        logger.info("Seed uploads restored: %s", ", ".join(copied_files))
     export_history.init_db()
     template_warmup = excel_processor.prewarm_template_cache()
     logger.info(f"Template cache prewarm: {template_warmup}")

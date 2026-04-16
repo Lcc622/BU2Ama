@@ -59,6 +59,10 @@ dmpz/backend/uploads/*
 dmpz/backend/results/*
 dmpz/frontend/node_modules/
 dmpz/frontend/dist/
+!ep/backend/seed_uploads/
+!ep/backend/seed_uploads/*
+!dmpz/backend/seed_uploads/
+!dmpz/backend/seed_uploads/*
 *.db
 
 # Build outputs

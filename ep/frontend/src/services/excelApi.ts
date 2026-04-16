@@ -1,7 +1,7 @@
 /**
  * Excel 处理 API 服务
  */
-import { apiClient } from '../lib/axios';
+import { apiClient, resolveApiUrl } from '../lib/axios';
 import type {
   AnalysisResult,
   ProcessRequest,
@@ -78,7 +78,7 @@ export const excelApi = {
 
   // 获取下载链接
   getDownloadUrl: (filename: string): string => {
-    return `${apiClient.defaults.baseURL}/api/download/${filename}`;
+    return resolveApiUrl(`/api/download/${filename}`);
   },
 
   // 列出已上传的文件
@@ -136,7 +136,7 @@ export const excelApi = {
 
   // 下载历史文件
   downloadExportHistory: (id: number): string => {
-    return `${apiClient.defaults.baseURL}/api/export-history/${id}/download`;
+    return resolveApiUrl(`/api/export-history/${id}/download`);
   },
 
   // 删除历史记录

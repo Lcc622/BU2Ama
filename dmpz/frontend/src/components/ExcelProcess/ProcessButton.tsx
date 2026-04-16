@@ -82,6 +82,14 @@ const validateGeneratedSkus = (generatedSkus: string[], selectedPrefixes: string
   return { valid: true, message: '' };
 };
 
+const getFallbackFiles = (templateType: string): string[] => {
+  if (templateType === 'PZUS') {
+    return ['PZ-1.xlsm', 'PZ-0.xlsm', 'PZ-All+Listings+Report.txt'];
+  }
+
+  return ['DA-0.xlsm', 'DM-All+Listings+Report.txt'];
+};
+
 export function ProcessButton() {
   const uploadedFiles = useUploadStore((state) => state.uploadedFiles);
   const selectedPrefixes = useUploadStore((state) => state.selectedPrefixes);
@@ -147,12 +155,7 @@ export function ProcessButton() {
     setIsProcessing(true);
 
     // 过滤掉模板文件，只传递数据文件
-    const fallbackFiles = [
-      'EP-2.xlsm',
-      'EP-1.xlsm',
-      'EP-0.xlsm',
-      'EP-All+Listings+Report.txt',
-    ];
+    const fallbackFiles = getFallbackFiles(templateType);
     const sourceFiles = uploadedFiles.length > 0 ? uploadedFiles : fallbackFiles;
 
     const dataFiles = sourceFiles.filter(filename => {

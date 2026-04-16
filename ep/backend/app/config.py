@@ -2,6 +2,7 @@
 配置管理模块
 """
 import os
+import shutil
 from pathlib import Path
 
 # 项目根目录（backend/app/config.py -> backend/）
@@ -22,6 +23,7 @@ def _resolve_dir_path(env_name: str, default_path: Path) -> Path:
 DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = _resolve_dir_path("UPLOADS_DIR", BASE_DIR / "uploads")
 RESULTS_DIR = _resolve_dir_path("RESULTS_DIR", BASE_DIR / "results")
+SEED_UPLOADS_DIR = BASE_DIR / "seed_uploads"
 
 # 确保目录存在
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -61,3 +63,19 @@ ALLOWED_STORE_PREFIXES = ("EP",)
 TEMPLATE_TO_STORE_PREFIX = {"EPUS": "EP"}
 
 HISTORY_DB_PATH = UPLOADS_DIR / "export_history.db"
+
+
+def ensure_seed_uploads() -> list[str]:
+    if not SEED_UPLOADS_DIR.exists():
+        return []
+
+    copied_files: list[str] = []
+    for seed_path in SEED_UPLOADS_DIR.iterdir():
+        if not seed_path.is_file():
+            continue
+        target_path = UPLOADS_DIR / seed_path.name
+        if target_path.exists():
+            continue
+        shutil.copy2(seed_path, target_path)
+        copied_files.append(seed_path.name)
+    return copied_files

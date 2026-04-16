@@ -1,12 +1,10 @@
-/**
- * 文件上传组件 - 支持多文件上传
- */
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+
 import { excelApi } from '../../services/excelApi';
 import { useUploadStore } from '../../store/useUploadStore';
 import type { AnalysisResult } from '../../types/api';
-import toast from 'react-hot-toast';
 
 const STORE_PREFIXES = ['EP', 'DM', 'DA', 'PZ'] as const;
 const ALLOWED_FIXED_FILES = new Set(
@@ -23,38 +21,40 @@ const isAllowedUploadFilename = (filename: string): boolean => {
 
 export function FileUploader() {
   const [isDragging, setIsDragging] = useState(false);
+  const [serverFilesChecked, setServerFilesChecked] = useState(false);
   const uploadedFiles = useUploadStore((state) => state.uploadedFiles);
   const addUploadedFile = useUploadStore((state) => state.addUploadedFile);
   const clearUploadedFiles = useUploadStore((state) => state.clearUploadedFiles);
+  const hasLoadedServerFiles = useRef(false);
 
-  // 页面加载时检查服务器上已有的固定数据文件（不执行分析）
   useEffect(() => {
+    if (hasLoadedServerFiles.current) {
+      return;
+    }
+    hasLoadedServerFiles.current = true;
+
     const loadServerFiles = async () => {
       try {
         const files = await excelApi.listFiles();
-
-        // 过滤出存在的目标文件
-        const existingFiles = files.filter((file) => {
-          return isAllowedUploadFilename(file.filename);
-        });
+        const existingFiles = files.filter((file) => isAllowedUploadFilename(file.filename));
 
         if (existingFiles.length > 0) {
           clearUploadedFiles();
-          existingFiles.forEach(file => {
+          existingFiles.forEach((file) => {
             addUploadedFile(file.filename);
           });
           toast.success(`已加载 ${existingFiles.length} 个数据文件`);
-        } else {
-          toast.error(`未找到固定数据文件，请先上传：${UPLOAD_FILE_HINT}`);
         }
       } catch (err) {
-        console.error('加载服务器文件失败:', err);
+        console.error('加载服务器文件失败', err);
         toast.error('加载服务器文件失败');
+      } finally {
+        setServerFilesChecked(true);
       }
     };
 
     loadServerFiles();
-  }, []); // 只在组件挂载时执行一次
+  }, [addUploadedFile, clearUploadedFiles]);
 
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]): Promise<AnalysisResult[]> => {
@@ -89,33 +89,28 @@ export function FileUploader() {
     setIsDragging(false);
 
     const files = Array.from(e.dataTransfer.files);
-    const allowedFiles = files.filter((file) => {
-      return isAllowedUploadFilename(file.name);
-    });
+    const allowedFiles = files.filter((file) => isAllowedUploadFilename(file.name));
 
     if (allowedFiles.length > 0) {
       uploadMutation.mutate(allowedFiles);
-    } else {
-      toast.error(`仅支持上传：${UPLOAD_FILE_HINT}`);
+      return;
     }
+
+    toast.error(`仅支持上传：${UPLOAD_FILE_HINT}`);
   }, [uploadMutation]);
 
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (files && files.length > 0) {
-        const selectedFiles = Array.from(files).filter((file) => isAllowedUploadFilename(file.name));
-        if (selectedFiles.length > 0) {
-          uploadMutation.mutate(selectedFiles);
-        } else {
-          toast.error(`仅支持上传：${UPLOAD_FILE_HINT}`);
-        }
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const selectedFiles = Array.from(files).filter((file) => isAllowedUploadFilename(file.name));
+      if (selectedFiles.length > 0) {
+        uploadMutation.mutate(selectedFiles);
+      } else {
+        toast.error(`仅支持上传：${UPLOAD_FILE_HINT}`);
       }
-      // 清空 input 以允许重复上传同一文件
-      e.target.value = '';
-    },
-    [uploadMutation]
-  );
+    }
+    e.target.value = '';
+  }, [uploadMutation]);
 
   return (
     <div className="space-y-4">
@@ -163,10 +158,10 @@ export function FileUploader() {
             {uploadMutation.isPending ? (
               <span className="flex items-center gap-2 text-primary-600 font-medium">
                 <svg className="animate-spin h-4 w-4 motion-reduce:animate-none" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                上传中…
+                上传中...
               </span>
             ) : (
               <>
@@ -184,7 +179,6 @@ export function FileUploader() {
         </label>
       </div>
 
-      {/* 已上传文件：展示计数和文件名 */}
       {uploadedFiles.length > 0 && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
           <p className="font-medium">已加载 {uploadedFiles.length} 个数据文件</p>
@@ -193,6 +187,12 @@ export function FileUploader() {
               <li key={filename}>{filename}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {serverFilesChecked && uploadedFiles.length === 0 && !uploadMutation.isPending && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          未检测到服务器中的固定数据文件，请先上传：{UPLOAD_FILE_HINT}
         </div>
       )}
 
